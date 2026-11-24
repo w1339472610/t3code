@@ -413,11 +413,33 @@ export const VoiceTranscriptionDestination = Schema.Union([
 ]);
 export type VoiceTranscriptionDestination = typeof VoiceTranscriptionDestination.Type;
 
+/** Which threads the menu bar island shows: all of them, or only those waiting on the user. */
+export const DesktopIslandScope = Schema.Literals(["all", "attention"]);
+export type DesktopIslandScope = typeof DesktopIslandScope.Type;
+export const DesktopIslandDoneMinutes = Schema.Literals([5, 15, 60]);
+export type DesktopIslandDoneMinutes = typeof DesktopIslandDoneMinutes.Type;
+export const DesktopIslandExpandOn = Schema.Literals(["hover", "click"]);
+export type DesktopIslandExpandOn = typeof DesktopIslandExpandOn.Type;
+
 export const ClientSettingsSchema = Schema.Struct({
   notificationMode: NotificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("off" as const)),
   ),
   inAppNotificationsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  desktopIslandEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Keep a small island in the menu bar when nothing is going on, so it can be opened any time. */
+  desktopIslandIdleVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  desktopIslandScope: DesktopIslandScope.pipe(
+    Schema.withDecodingDefault(Effect.succeed("all" as const)),
+  ),
+  desktopIslandDoneMinutes: DesktopIslandDoneMinutes.pipe(
+    Schema.withDecodingDefault(Effect.succeed(15 as const)),
+  ),
+  desktopIslandExpandOn: DesktopIslandExpandOn.pipe(
+    Schema.withDecodingDefault(Effect.succeed("hover" as const)),
+  ),
+  desktopIslandOnFullScreen: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  desktopIslandMotion: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffColorScheme: DiffColorScheme.pipe(
     Schema.withDecodingDefault(Effect.succeed("red-green" as const)),
   ),
@@ -2080,6 +2102,13 @@ export function requiredScopesForProjectMutation(
 export const ClientSettingsPatch = Schema.Struct({
   notificationMode: Schema.optionalKey(NotificationMode),
   inAppNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
+  desktopIslandEnabled: Schema.optionalKey(Schema.Boolean),
+  desktopIslandIdleVisible: Schema.optionalKey(Schema.Boolean),
+  desktopIslandScope: Schema.optionalKey(DesktopIslandScope),
+  desktopIslandDoneMinutes: Schema.optionalKey(DesktopIslandDoneMinutes),
+  desktopIslandExpandOn: Schema.optionalKey(DesktopIslandExpandOn),
+  desktopIslandOnFullScreen: Schema.optionalKey(Schema.Boolean),
+  desktopIslandMotion: Schema.optionalKey(Schema.Boolean),
   diffColorScheme: Schema.optionalKey(DiffColorScheme),
   chatWidth: Schema.optionalKey(ChatWidth),
   htmlPreviewWidth: Schema.optionalKey(HtmlPreviewWidth),

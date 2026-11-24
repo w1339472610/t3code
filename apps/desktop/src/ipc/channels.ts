@@ -1,6 +1,11 @@
 export const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 export const TO_LOCAL_BACKEND_PATH_CHANNEL = "desktop:to-local-backend-path";
 export const SET_NOTIFICATION_BADGE_CHANNEL = "desktop:set-notification-badge";
+export const SET_ISLAND_CHANNEL = "desktop:set-island";
+export const ISLAND_ACTION_TO_APP_CHANNEL = "desktop:island-action";
+export const ISLAND_STATE_CHANNEL = "island:state";
+export const ISLAND_POINTER_CHANNEL = "island:pointer";
+export const ISLAND_ACTION_CHANNEL = "island:action";
 export const PICK_PROJECT_FAVICON_CHANNEL = "desktop:pick-project-favicon";
 export const PICK_THEME_FILES_CHANNEL = "desktop:pick-theme-files";
 export const SET_THEME_CHANNEL = "desktop:set-theme";

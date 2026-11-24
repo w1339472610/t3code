@@ -3,6 +3,7 @@ import type { PreviewCaptureFailureEncoded } from "./previewCapture.ts";
 
 import { SnapShotSource } from "./chatAttachment.ts";
 import { EnvironmentId, PortSchema, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ProviderApprovalDecision } from "./providerPolicy.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
 import type {
   BrowserImportResult,
@@ -1104,6 +1105,105 @@ export const DesktopAppleSpeechTranscribeInputSchema = Schema.Struct({
   // 16 kHz mono Float32 PCM, at most five minutes.
   pcm: Schema.Uint8Array,
 });
+/** What the macOS menu bar island shows for one thread, most urgent first. */
+export const DesktopIslandStatusSchema = Schema.Literals([
+  "approval",
+  "input",
+  "request",
+  "failed",
+  "limited",
+  "working",
+  "done",
+]);
+export type DesktopIslandStatus = typeof DesktopIslandStatusSchema.Type;
+
+const IslandText = Schema.String.check(Schema.isMaxLength(512));
+
+/** What a waiting thread asks for, with enough to answer it from the island. */
+export const DesktopIslandRequestSchema = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("approval"),
+    requestId: IslandText,
+    /** The provider's request kind, such as `command` or `file-change`. */
+    action: IslandText,
+    /** The command line, path, or tool the agent wants to use. */
+    body: Schema.NullOr(IslandText),
+    decisions: Schema.Array(ProviderApprovalDecision).check(Schema.isMaxLength(5)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("input"),
+    requestId: IslandText,
+    questionId: IslandText,
+    question: IslandText,
+    options: Schema.Array(
+      Schema.Struct({
+        label: IslandText,
+        value: IslandText,
+        description: Schema.NullOr(IslandText),
+      }),
+    ).check(Schema.isMaxLength(12)),
+    /** One single-choice question: picking an option answers the request. */
+    direct: Schema.Boolean,
+  }),
+]);
+export type DesktopIslandRequest = typeof DesktopIslandRequestSchema.Type;
+
+export const DesktopIslandItemSchema = Schema.Struct({
+  environmentId: IslandText,
+  threadId: IslandText,
+  title: IslandText,
+  project: Schema.NullOr(IslandText),
+  status: DesktopIslandStatusSchema,
+  /** Epoch ms: when the run started for working threads, when it ended for the rest. */
+  since: Schema.NullOr(Schema.Number),
+  /** One line under the title, such as a failure's error. */
+  detail: Schema.NullOr(IslandText),
+  request: Schema.NullOr(DesktopIslandRequestSchema),
+  canStop: Schema.Boolean,
+});
+export type DesktopIslandItem = typeof DesktopIslandItemSchema.Type;
+
+const IslandThreadRef = { environmentId: IslandText, threadId: IslandText };
+
+/** What the island asks the app to do; the renderer that owns the threads carries it out. */
+export const DesktopIslandActionSchema = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("open"), ...IslandThreadRef }),
+  Schema.Struct({
+    type: Schema.Literal("approve"),
+    ...IslandThreadRef,
+    requestId: IslandText,
+    decision: ProviderApprovalDecision,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("answer"),
+    ...IslandThreadRef,
+    requestId: IslandText,
+    questionId: IslandText,
+    answer: IslandText,
+  }),
+  Schema.Struct({ type: Schema.Literal("stop"), ...IslandThreadRef }),
+  Schema.Struct({ type: Schema.Literal("settings") }),
+]);
+export type DesktopIslandAction = typeof DesktopIslandActionSchema.Type;
+
+/** How the island looks and behaves, from the user's settings. */
+export const DesktopIslandPrefsSchema = Schema.Struct({
+  /** Stay in the menu bar, small, when no thread needs showing. */
+  idleVisible: Schema.Boolean,
+  expandOn: Schema.Literals(["hover", "click"]),
+  onFullScreen: Schema.Boolean,
+  motion: Schema.Boolean,
+});
+export type DesktopIslandPrefs = typeof DesktopIslandPrefsSchema.Type;
+
+export const DesktopIslandSnapshotSchema = Schema.Struct({
+  language: Schema.Literals(["en", "zh"]),
+  prefs: DesktopIslandPrefsSchema,
+  /** The last thread to finish, for a resting island to show; sent only when it stays visible. */
+  recent: Schema.NullOr(DesktopIslandItemSchema),
+  items: Schema.Array(DesktopIslandItemSchema).check(Schema.isMaxLength(64)),
+});
+export type DesktopIslandSnapshot = typeof DesktopIslandSnapshotSchema.Type;
 
 export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
@@ -1117,6 +1217,9 @@ export interface DesktopBridge {
   restartAudioService?: () => Promise<boolean>;
   setNotificationBadge: (badge: { count: number; image: string | null }) => Promise<void>;
   onNotificationBadgeClear: (listener: () => void) => () => void;
+  /** macOS only: the menu bar status island. `null` removes it. */
+  setIsland?: (snapshot: DesktopIslandSnapshot | null) => Promise<void>;
+  onIslandAction?: (listener: (action: DesktopIslandAction) => void) => () => void;
   onTrackpadScrollBegin: (listener: () => void) => () => void;
   onTrackpadScrollEnd: (listener: () => void) => () => void;
   /**

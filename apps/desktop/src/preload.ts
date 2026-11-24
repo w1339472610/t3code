@@ -1,5 +1,6 @@
 import type {
   DesktopBridge,
+  DesktopIslandAction,
   DesktopPreviewAnnotationVoiceEvent,
   DesktopPreviewFindResultEvent,
   DesktopPreviewOpenLinkEvent,
@@ -124,6 +125,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     const handler = () => listener();
     ipcRenderer.on(IpcChannels.SET_NOTIFICATION_BADGE_CHANNEL, handler);
     return () => ipcRenderer.removeListener(IpcChannels.SET_NOTIFICATION_BADGE_CHANNEL, handler);
+  },
+  setIsland: (snapshot) => ipcRenderer.invoke(IpcChannels.SET_ISLAND_CHANNEL, snapshot),
+  onIslandAction: (listener) => {
+    // The main process decoded the action against DesktopIslandActionSchema before sending it.
+    const handler = (_event: Electron.IpcRendererEvent, action: DesktopIslandAction) =>
+      listener(action);
+    ipcRenderer.on(IpcChannels.ISLAND_ACTION_TO_APP_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(IpcChannels.ISLAND_ACTION_TO_APP_CHANNEL, handler);
   },
   onTrackpadScrollBegin: (listener) => {
     const handler = () => listener();

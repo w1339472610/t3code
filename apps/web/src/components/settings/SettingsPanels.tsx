@@ -1,6 +1,7 @@
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m as resolveMessage } from "~/i18n/messages";
 import { useAtomValue } from "@effect/atom-react";
+import { DesktopIslandSettings } from "./DesktopIslandSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { CheckIcon } from "lucide-react";
@@ -538,6 +539,15 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.inAppNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled
       ? [gt("In-app notifications")]
       : []),
+    ...(settings.desktopIslandEnabled !== DEFAULT_UNIFIED_SETTINGS.desktopIslandEnabled ||
+    settings.desktopIslandIdleVisible !== DEFAULT_UNIFIED_SETTINGS.desktopIslandIdleVisible ||
+    settings.desktopIslandScope !== DEFAULT_UNIFIED_SETTINGS.desktopIslandScope ||
+    settings.desktopIslandDoneMinutes !== DEFAULT_UNIFIED_SETTINGS.desktopIslandDoneMinutes ||
+    settings.desktopIslandExpandOn !== DEFAULT_UNIFIED_SETTINGS.desktopIslandExpandOn ||
+    settings.desktopIslandOnFullScreen !== DEFAULT_UNIFIED_SETTINGS.desktopIslandOnFullScreen ||
+    settings.desktopIslandMotion !== DEFAULT_UNIFIED_SETTINGS.desktopIslandMotion
+      ? ["Menu bar island"]
+      : []),
     ...(settings.sidebarProjectGroupingMode !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
       ? [gt("Project Grouping")]
       : []),
@@ -719,6 +729,13 @@ export function useSettingsRestore(onRestored?: () => void) {
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
+      desktopIslandEnabled: DEFAULT_UNIFIED_SETTINGS.desktopIslandEnabled,
+      desktopIslandIdleVisible: DEFAULT_UNIFIED_SETTINGS.desktopIslandIdleVisible,
+      desktopIslandScope: DEFAULT_UNIFIED_SETTINGS.desktopIslandScope,
+      desktopIslandDoneMinutes: DEFAULT_UNIFIED_SETTINGS.desktopIslandDoneMinutes,
+      desktopIslandExpandOn: DEFAULT_UNIFIED_SETTINGS.desktopIslandExpandOn,
+      desktopIslandOnFullScreen: DEFAULT_UNIFIED_SETTINGS.desktopIslandOnFullScreen,
+      desktopIslandMotion: DEFAULT_UNIFIED_SETTINGS.desktopIslandMotion,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       persistComposerContextStrip: DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
       diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
@@ -877,6 +894,8 @@ export function GeneralSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      {isElectron && isMacPlatform(navigator.platform) ? <DesktopIslandSettings /> : null}
 
       <SettingsSection id="sidebar" title={gt("Sidebar")}>
         <SettingsRow

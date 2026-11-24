@@ -113,7 +113,11 @@ export class ElectronWindow extends Context.Service<
     /** Auxiliary windows are never returned as the main-or-first fallback. */
     readonly create: (
       options: Electron.BrowserWindowConstructorOptions,
-      behavior?: { readonly auxiliary?: boolean },
+      behavior?: {
+        readonly auxiliary?: boolean;
+        /** Theme changes leave its background alone, as a transparent overlay needs. */
+        readonly ownAppearance?: boolean;
+      },
     ) => Effect.Effect<Electron.BrowserWindow, ElectronWindowCreateError>;
     readonly main: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
     readonly currentMainOrFirst: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
@@ -149,6 +153,7 @@ export const make = Effect.gen(function* () {
   const mainWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
   const auxiliaryWindows = new WeakSet<Electron.BrowserWindow>();
   const titleBarOverlayWindows = new WeakSet<Electron.BrowserWindow>();
+  const ownAppearanceWindows = new WeakSet<Electron.BrowserWindow>();
 
   const listWindows = Effect.try({
     try: () => Electron.BrowserWindow.getAllWindows(),
@@ -248,6 +253,7 @@ export const make = Effect.gen(function* () {
           if (options.titleBarOverlay !== undefined && options.titleBarOverlay !== false) {
             titleBarOverlayWindows.add(window);
           }
+          if (behavior?.ownAppearance === true) ownAppearanceWindows.add(window);
           return window;
         },
         catch: (cause) => new ElectronWindowCreateError({ options: diagnosticOptions, cause }),
@@ -397,7 +403,7 @@ export const make = Effect.gen(function* () {
     ) {
       const windows = yield* listWindows;
       for (const window of windows) {
-        if (yield* isWindowDestroyed(window)) {
+        if (ownAppearanceWindows.has(window) || (yield* isWindowDestroyed(window))) {
           continue;
         }
         yield* sync(window, { titleBarOverlay: titleBarOverlayWindows.has(window) });
