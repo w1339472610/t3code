@@ -2,6 +2,7 @@ import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m as resolveMessage } from "~/i18n/messages";
 import { useAtomValue } from "@effect/atom-react";
 import { DesktopIslandSettings } from "./DesktopIslandSettings";
+import { DailyNotesSettings } from "../dailyNotes/DailyNotesSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { CheckIcon } from "lucide-react";
@@ -896,6 +897,8 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       {isElectron && isMacPlatform(navigator.platform) ? <DesktopIslandSettings /> : null}
+
+      <DailyNotesSettings />
 
       <SettingsSection id="sidebar" title={gt("Sidebar")}>
         <SettingsRow

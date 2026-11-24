@@ -453,6 +453,13 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
+import {
+  DailyNote,
+  DailyNoteError,
+  DailyNoteReadInput,
+  DailyNotesSnapshot,
+  DailyNoteWriteInput,
+} from "./dailyNotes.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import { AgentFeedbackAnswerInput, AgentFeedbackRequestError } from "./agentFeedback.ts";
 import {
@@ -654,6 +661,10 @@ export const WS_METHODS = {
   guestShareCreate: "guestShare.create",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
+
+  dailyNotesSubscribe: "dailyNotes.subscribe",
+  dailyNotesRead: "dailyNotes.read",
+  dailyNotesWrite: "dailyNotes.write",
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -2365,6 +2376,25 @@ const WsWorkflowsDeleteDefinitionRpc = Rpc.make(WS_METHODS.workflowsDeleteDefini
   error: EnvironmentAuthorizationError,
 });
 
+const WsDailyNotesSubscribeRpc = Rpc.make(WS_METHODS.dailyNotesSubscribe, {
+  payload: Schema.Struct({}),
+  success: DailyNotesSnapshot,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsDailyNotesReadRpc = Rpc.make(WS_METHODS.dailyNotesRead, {
+  payload: DailyNoteReadInput,
+  success: DailyNote,
+  error: Schema.Union([DailyNoteError, EnvironmentAuthorizationError]),
+});
+
+const WsDailyNotesWriteRpc = Rpc.make(WS_METHODS.dailyNotesWrite, {
+  payload: DailyNoteWriteInput,
+  success: DailyNote,
+  error: Schema.Union([DailyNoteError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -2550,6 +2580,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsWorkflowsSaveDefinitionRpc,
   WsWorkflowsDeleteDefinitionRpc,
   WsScheduledTasksSubscribeRpc,
+  WsDailyNotesSubscribeRpc,
+  WsDailyNotesReadRpc,
+  WsDailyNotesWriteRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,

@@ -63,6 +63,7 @@ import {
   ArrowLeftIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
+  NotebookPenIcon,
   CheckIcon,
   ChevronRightIcon,
   CornerLeftUpIcon,
@@ -1774,6 +1775,18 @@ function OpenCommandPaletteDialog(props: {
     shortcutCommand: "usage.open",
     run: async () => {
       await navigate({ to: "/usage" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:daily-notes",
+    searchTerms: ["daily notes", "notes", "today", "journal", "outline", "todo"],
+    title: gt("Open daily notes"),
+    icon: <NotebookPenIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "dailyNotes.open",
+    run: async () => {
+      await navigate({ to: "/notes" });
     },
   });
 

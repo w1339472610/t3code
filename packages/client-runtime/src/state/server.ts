@@ -1393,6 +1393,18 @@ export function createServerEnvironmentAtoms<R, E>(
       );
     }).pipe(Atom.withLabel(`environment-data:server:usage-prices:${environmentId}`)),
   );
+  // One lane per day, so a read queued behind that day's save sees it.
+  const dailyNoteScheduler = createAtomCommandScheduler();
+  const dailyNoteConcurrency = {
+    mode: "serial" as const,
+    key: ({
+      environmentId,
+      input,
+    }: {
+      readonly environmentId: string;
+      readonly input: { readonly date: string };
+    }) => `${environmentId}:${input.date}`,
+  };
   const usageScanSettingsAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get) => {
       const settings = get(settingsValueAtom(environmentId));
@@ -1662,6 +1674,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
     }),
+    dailyNotesLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:daily-notes:live",
+      tag: WS_METHODS.dailyNotesSubscribe,
+    }),
     // A cold transcript scan is measured in seconds, so keep the result around
     // long enough that switching windows or re-rendering does not rescan. With
     // nothing to show yet, the server's last scan answers first, then a plain
@@ -1923,6 +1939,18 @@ export function createServerEnvironmentAtoms<R, E>(
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,
+    }),
+    readDailyNote: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:daily-note:read",
+      tag: WS_METHODS.dailyNotesRead,
+      scheduler: dailyNoteScheduler,
+      concurrency: dailyNoteConcurrency,
+    }),
+    writeDailyNote: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:daily-note:write",
+      tag: WS_METHODS.dailyNotesWrite,
+      scheduler: dailyNoteScheduler,
+      concurrency: dailyNoteConcurrency,
     }),
     upsertScheduledTask: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:upsert",

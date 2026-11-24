@@ -4,6 +4,9 @@ import { type RefObject, useEffect, useEffectEvent, useSyncExternalStore } from 
 import type { ThreadContextDropRef } from "./threadContextDrop.logic";
 
 export const THREAD_CONTEXT_DROP_EVENT = "t3-thread-context-drop";
+/** Sent to the target under the pointer while threads are dragged over it, with `{x, y}`. */
+export const THREAD_CONTEXT_HOVER_EVENT = "t3-thread-context-hover";
+export const THREAD_CONTEXT_LEAVE_EVENT = "t3-thread-context-leave";
 
 export function useThreadContextDrop(
   targetRef: RefObject<EventTarget | null>,
@@ -79,14 +82,17 @@ export function moveThreadContextDrag(
   const target = findDropTarget(point);
   if (target !== overTarget) {
     overTarget?.removeAttribute(DROP_OVER_ATTRIBUTE);
+    overTarget?.dispatchEvent(new CustomEvent(THREAD_CONTEXT_LEAVE_EVENT));
     target?.setAttribute(DROP_OVER_ATTRIBUTE, "true");
     overTarget = target;
   }
+  target?.dispatchEvent(new CustomEvent(THREAD_CONTEXT_HOVER_EVENT, { detail: point }));
   setGhost({ x: point.x, y: point.y, ...label });
 }
 
 export function endThreadContextDrag() {
   overTarget?.removeAttribute(DROP_OVER_ATTRIBUTE);
+  overTarget?.dispatchEvent(new CustomEvent(THREAD_CONTEXT_LEAVE_EVENT));
   overTarget = null;
   setGhost(null);
 }

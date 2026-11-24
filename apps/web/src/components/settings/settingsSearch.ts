@@ -770,6 +770,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "daily-notes-location",
+    title: msg("Daily notes folder"),
+    to: "/settings/general",
+    scope: "environment-defaults",
+    searchTerms: [msg("daily notes journal outline folder directory path markdown obsidian")],
+  },
+  {
     id: "menu-bar-island",
     title: msg("Show the island"),
     to: "/settings/general",

@@ -28,6 +28,7 @@ import { PullRequestDetailPanel } from "../pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "../pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "../pullRequest/PullRequestsUnavailableState";
 import { ThreadPullRequestsPanel } from "../pullRequest/ThreadPullRequestsPanel";
+import { DailyNotesView } from "../dailyNotes/DailyNotesView";
 
 const PreviewPanel = lazy(() =>
   import("../preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
@@ -113,6 +114,8 @@ export function RightPanelSurfaceContent(props: {
           surface={surface}
         />
       );
+    case "notes":
+      return <DailyNotesView variant="panel" />;
     case "diff":
       return (
         <Suspense fallback={null}>

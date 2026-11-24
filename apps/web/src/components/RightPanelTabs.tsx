@@ -49,6 +49,7 @@ import {
   ChevronRight,
   FileDiff,
   Files,
+  NotebookPen,
   Globe2,
   MessagesSquare,
   Plus,
@@ -160,6 +161,7 @@ export interface RightPanelTabsProps {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
+  onAddDailyNotes?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -346,6 +348,7 @@ function RightPanelEmptyState(props: {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
+  onAddDailyNotes?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -418,6 +421,18 @@ function RightPanelEmptyState(props: {
       disabledReason: messages(SURFACE_UNAVAILABLE_HINTS.device),
       onClick: props.onAddDevice,
     },
+    ...(props.onAddDailyNotes
+      ? [
+          {
+            label: msg("Daily notes"),
+            icon: NotebookPen,
+            shortcut: "N",
+            available: true,
+            disabledReason: "",
+            onClick: props.onAddDailyNotes,
+          },
+        ]
+      : []),
     ...(props.onAddSideChat
       ? [
           {
@@ -601,6 +616,8 @@ function surfaceTitle(
   resolve: MessageResolver = m,
 ): string {
   switch (surface.kind) {
+    case "notes":
+      return resolve(msg("Daily notes"));
     case "diff":
       return resolve(msg("Diff"));
     case "files":
@@ -694,6 +711,8 @@ function SurfaceIcon({
   switch (surface.kind) {
     case "preview":
       return <PreviewFavicon capturedUrl={previewCapturedUrl} url={previewUrl} />;
+    case "notes":
+      return <NotebookPen className="size-3 shrink-0" />;
     case "diff":
       return <FileDiff className="size-3 shrink-0" />;
     case "files":
@@ -1260,6 +1279,18 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       disabledReason: messages(SURFACE_DISABLED_REASONS.device),
       onClick: props.onAddDevice,
     },
+    ...(props.onAddDailyNotes
+      ? [
+          {
+            label: msg("Daily notes"),
+            icon: NotebookPen,
+            shortcut: "N",
+            available: true,
+            disabledReason: "",
+            onClick: props.onAddDailyNotes,
+          },
+        ]
+      : []),
     ...(props.onAddSideChat
       ? [
           {
@@ -1698,6 +1729,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequests={props.onAddPullRequests}
             onAddDevice={props.onAddDevice}
             onAddSideChat={props.onAddSideChat}
+            onAddDailyNotes={props.onAddDailyNotes}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}

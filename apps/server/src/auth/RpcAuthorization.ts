@@ -130,6 +130,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverSignalProcess]: AuthEnvironmentMaintainScope,
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
   [WS_METHODS.scheduledTasksSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.dailyNotesSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.dailyNotesRead]: AuthOrchestrationReadScope,
   [WS_METHODS.workflowsSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.workflowsCounts]: AuthOrchestrationReadScope,
   [WS_METHODS.workflowsGet]: AuthOrchestrationReadScope,
