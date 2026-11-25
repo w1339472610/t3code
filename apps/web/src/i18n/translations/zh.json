@@ -13023,5 +13023,13 @@
   "724666b26cda8691": "移除链接",
   "0fdf0f543a382369": "链接地址",
   "37a429403eb2ce81": "粘贴或输入链接",
-  "e321d312eb7386a8": "确定"
+  "e321d312eb7386a8": "确定",
+  "a20c06161d145ebc": "{count, plural, other {已读取每日笔记 {count} 次}}",
+  "b2df4d199dddc557": "{count, plural, other {尝试读取每日笔记 {count} 次}}",
+  "5213f24ff7c1f056": "{count, plural, other {已编辑每日笔记 {count} 次}}",
+  "97a75b59375782c2": "{count, plural, other {尝试编辑每日笔记 {count} 次}}",
+  "52e1fc8e9217f98e": "{status, select, inProgress {正在读取每日笔记} completed {已读取每日笔记} failed {读取每日笔记失败} declined {已拒绝读取每日笔记} stopped {已停止读取每日笔记} other {正在读取每日笔记}}",
+  "4ed47d40b5331942": "{status, select, inProgress {正在编辑每日笔记} completed {已编辑每日笔记} failed {编辑每日笔记失败} declined {已拒绝编辑每日笔记} stopped {已停止编辑每日笔记} other {正在编辑每日笔记}}",
+  "2ae7284241b9c372": "读取每日笔记",
+  "92f3b8a790dfbab4": "编辑每日笔记"
 }

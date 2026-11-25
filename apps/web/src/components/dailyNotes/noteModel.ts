@@ -5,6 +5,8 @@
  * `noteInline.ts`.
  */
 
+import { matchSequences } from "@t3tools/shared/lineMerge";
+
 import {
   type NoteSegment,
   type NoteThreadSegment,
@@ -477,4 +479,69 @@ export function insertAtTarget(
   return target.parentId === null
     ? next
     : updateNode(next, target.parentId, (node) => ({ ...node, collapsed: false }));
+}
+
+/**
+ * Gives the nodes of a reloaded `next` the ids of their counterparts in
+ * `previous`, so rows keep focus and the caret when the file changes outside
+ * this client. `changed` holds the ids whose line is new or different.
+ */
+export function adoptIds(
+  previous: NoteTree,
+  next: NoteTree,
+): { readonly tree: NoteTree; readonly changed: ReadonlySet<string> } {
+  const flatten = (tree: NoteTree) => {
+    const entries: Array<{ node: NoteNode; key: string }> = [];
+    const walk = (nodes: NoteTree, depth: number) => {
+      for (const node of nodes) {
+        const line = serializeNote([{ ...node, children: [], collapsed: false }]);
+        entries.push({ node, key: `${depth}:${line}` });
+        walk(node.children, depth + 1);
+      }
+    };
+    walk(tree, 0);
+    return entries;
+  };
+  const before = flatten(previous);
+  const after = flatten(next);
+  const matches = matchSequences(
+    after.map((entry) => entry.key),
+    before.map((entry) => entry.key),
+  );
+  const ids = new Map<NoteNode, string>();
+  // An unchanged line keeps its segments array, so its editor is not repainted mid-composition.
+  const kept = new Map<NoteNode, NoteNode>();
+  const changed = new Set<string>();
+  let lastMatched = -1;
+  let gap: number[] = [];
+  // Unmatched lines between two matches take the old ids of that stretch in order: an edited line stays the same row.
+  const closeGap = (until: number) => {
+    gap.forEach((index, offset) => {
+      const candidate = lastMatched + 1 + offset;
+      const id = candidate < until ? before[candidate]!.node.id : after[index]!.node.id;
+      ids.set(after[index]!.node, id);
+      changed.add(id);
+    });
+    gap = [];
+  };
+  after.forEach((entry, index) => {
+    const match = matches[index]!;
+    if (match < 0) {
+      gap.push(index);
+      return;
+    }
+    closeGap(match);
+    ids.set(entry.node, before[match]!.node.id);
+    kept.set(entry.node, before[match]!.node);
+    lastMatched = match;
+  });
+  closeGap(before.length);
+  const rebuild = (nodes: NoteTree): NoteNode[] =>
+    nodes.map((node) => ({
+      ...node,
+      id: ids.get(node) ?? node.id,
+      segments: kept.get(node)?.segments ?? node.segments,
+      children: rebuild(node.children),
+    }));
+  return { tree: rebuild(next), changed };
 }

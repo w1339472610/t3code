@@ -19,7 +19,6 @@ import {
   editDay,
   requestFocus,
   setBlockSelection,
-  setEditingDate,
   undoDay,
   useDailyNotesStore,
 } from "./dailyNotesStore";
@@ -833,11 +832,9 @@ function NoteTextImpl(props: {
       onPaste={onPaste}
       onClick={onClick}
       onFocus={() => {
-        setEditingDate(date);
         if (useDailyNotesStore.getState().selection) setBlockSelection(null);
       }}
       onBlur={() => {
-        setEditingDate(null);
         pending.current = null;
         const picker = useMentionPickerStore.getState().picker;
         if (picker?.nodeId === node.id) setTimeout(closeMentionPickerIfBlurred, 150);
@@ -881,6 +878,7 @@ export const NoteRow = memo(function NoteRow(props: {
     node.style === "h3" ||
     node.style === "quote";
   const view = useNotesView();
+  const changedElsewhere = useDailyNotesStore((state) => state.recent[node.id] === true);
   const hasChildren = node.children.length > 0;
   return (
     <div
@@ -888,8 +886,8 @@ export const NoteRow = memo(function NoteRow(props: {
       data-node-id={node.id}
       data-depth={depth}
       className={cn(
-        "group/row relative flex items-start rounded-sm pr-1",
-        props.selected && "bg-primary/10",
+        "group/row relative flex items-start rounded-sm pr-1 transition-colors duration-700",
+        props.selected ? "bg-primary/10" : changedElsewhere && "bg-primary/8",
       )}
       style={{ paddingLeft: depth * indentFor(props.density) }}
     >

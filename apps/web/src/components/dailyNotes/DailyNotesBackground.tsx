@@ -116,8 +116,8 @@ export function DailyNotesBackground() {
         const result = await read({ environmentId, input: { date } });
         return result._tag === "Success" ? result.value : null;
       },
-      write: async (date: DailyNoteDate, content: string) => {
-        const result = await write({ environmentId, input: { date, content } });
+      write: async (date: DailyNoteDate, content: string, base: string) => {
+        const result = await write({ environmentId, input: { date, content, base } });
         return result._tag === "Success" ? result.value : null;
       },
     });

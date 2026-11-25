@@ -51,6 +51,8 @@ export type T3McpToolSummaryAction =
   | "project-delete"
   | "project-clone"
   | "environment-read"
+  | "notes-read"
+  | "notes-edit"
   | "environment-links"
   | "environment-link"
   | "environment-unlink"
@@ -400,6 +402,8 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   t3_worktree_list: tool(["List", "Listing", "Listed", "workspace branches"], "worktree-list"),
   t3_preview_list: tool(["List", "Listing", "Listed", "preview tabs"], "browser", "browser"),
   t3_preview_close: tool(["Close", "Closing", "Closed", "a preview tab"], "browser", "browser"),
+  daily_notes_read: tool(["Read", "Reading", "Read", "daily notes"], "notes-read"),
+  daily_notes_edit: tool(["Edit", "Editing", "Edited", "daily notes"], "notes-edit"),
   t3_environment_read: tool(
     ["Read", "Reading", "Read", "environment preferences"],
     "environment-read",

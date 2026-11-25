@@ -99,6 +99,8 @@ const DISPLAY_NAMES: ReadonlyMap<string, string> = new Map([
   ["List workspace branches", msg("List workspace branches")],
   ["List preview tabs", msg("List preview tabs")],
   ["Close a preview tab", msg("Close a preview tab")],
+  ["Read daily notes", msg("Read daily notes")],
+  ["Edit daily notes", msg("Edit daily notes")],
   ["Read environment preferences", msg("Read environment preferences")],
   ["List linked environments", msg("List linked environments")],
   ["Ask to link an environment", msg("Ask to link an environment")],

@@ -5643,5 +5643,13 @@
   "eb287395a09cd288": "Skicka anslutningsspårningar",
   "6787f93bbf6ce0b6": "Hjälper T3 Code-teamet att åtgärda anslutningsproblem. Spårningar innehåller tider, feltyper, ett ID för den här appsessionen och appversionen, aldrig dina trådar, prompter eller din kod. Du kan ändra det under Inställningar > Om T3 Code > Diagnostik.",
   "0b1e4aecbd38e0cf": "När appen ansluter till en dator via {product} skickar den hur lång tid varje steg tog, feltypen, ett ID för den här appsessionen och appversionen till T3 Code-teamet. Spårningar innehåller aldrig dina trådar, prompter eller din kod.",
-  "e0856d6a402ad821": "Policyn för {organization} tillåter inte projekts layoutkommandon för worktrees."
+  "e0856d6a402ad821": "Policyn för {organization} tillåter inte projekts layoutkommandon för worktrees.",
+  "a20c06161d145ebc": "{count, plural, one {Read daily notes {count} time} other {Read daily notes {count} times}}",
+  "b2df4d199dddc557": "{count, plural, one {Tried to read daily notes {count} time} other {Tried to read daily notes {count} times}}",
+  "5213f24ff7c1f056": "{count, plural, one {Edited daily notes {count} time} other {Edited daily notes {count} times}}",
+  "97a75b59375782c2": "{count, plural, one {Tried to edit daily notes {count} time} other {Tried to edit daily notes {count} times}}",
+  "52e1fc8e9217f98e": "{status, select, inProgress {Reading daily notes} completed {Read daily notes} failed {Failed to read daily notes} declined {Declined to read daily notes} stopped {Stopped reading daily notes} other {Reading daily notes}}",
+  "4ed47d40b5331942": "{status, select, inProgress {Editing daily notes} completed {Edited daily notes} failed {Failed to edit daily notes} declined {Declined to edit daily notes} stopped {Stopped editing daily notes} other {Editing daily notes}}",
+  "2ae7284241b9c372": "Read daily notes",
+  "92f3b8a790dfbab4": "Edit daily notes"
 }

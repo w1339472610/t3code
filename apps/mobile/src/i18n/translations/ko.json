@@ -5622,5 +5622,13 @@
   "eb287395a09cd288": "연결 트레이스 보내기",
   "6787f93bbf6ce0b6": "T3 Code 팀이 연결 문제를 해결하는 데 도움이 됩니다. 트레이스에는 소요 시간, 오류 유형, 이 앱 세션의 ID, 앱 버전이 포함되며 스레드, 프롬프트, 코드는 포함되지 않습니다. 설정 > T3 Code 정보 > 진단에서 변경할 수 있습니다.",
   "0b1e4aecbd38e0cf": "앱이 {product}를 통해 컴퓨터에 연결하면 각 단계에 걸린 시간, 오류 유형, 이 앱 세션의 ID, 앱 버전을 T3 Code 팀에 보냅니다. 트레이스에는 스레드, 프롬프트, 코드가 포함되지 않습니다.",
-  "e0856d6a402ad821": "{organization}의 정책상 프로젝트의 워크트리 레이아웃 명령을 사용할 수 없습니다."
+  "e0856d6a402ad821": "{organization}의 정책상 프로젝트의 워크트리 레이아웃 명령을 사용할 수 없습니다.",
+  "a20c06161d145ebc": "{count, plural, one {Read daily notes {count} time} other {Read daily notes {count} times}}",
+  "b2df4d199dddc557": "{count, plural, one {Tried to read daily notes {count} time} other {Tried to read daily notes {count} times}}",
+  "5213f24ff7c1f056": "{count, plural, one {Edited daily notes {count} time} other {Edited daily notes {count} times}}",
+  "97a75b59375782c2": "{count, plural, one {Tried to edit daily notes {count} time} other {Tried to edit daily notes {count} times}}",
+  "52e1fc8e9217f98e": "{status, select, inProgress {Reading daily notes} completed {Read daily notes} failed {Failed to read daily notes} declined {Declined to read daily notes} stopped {Stopped reading daily notes} other {Reading daily notes}}",
+  "4ed47d40b5331942": "{status, select, inProgress {Editing daily notes} completed {Edited daily notes} failed {Failed to edit daily notes} declined {Declined to edit daily notes} stopped {Stopped editing daily notes} other {Editing daily notes}}",
+  "2ae7284241b9c372": "Read daily notes",
+  "92f3b8a790dfbab4": "Edit daily notes"
 }

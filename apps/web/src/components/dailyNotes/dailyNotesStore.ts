@@ -1,11 +1,13 @@
 import type { DailyNote, DailyNoteDate, DailyNotesSnapshot } from "@t3tools/contracts";
+import { mergeLines } from "@t3tools/shared/lineMerge";
 import { create } from "zustand";
 
-import { type NoteTree, parseNote, serializeNote } from "./noteModel";
+import { adoptIds, type NoteTree, parseNote, serializeNote } from "./noteModel";
 
 export interface DailyNotesIo {
   readonly read: (date: DailyNoteDate) => Promise<DailyNote | null>;
-  readonly write: (date: DailyNoteDate, content: string) => Promise<DailyNote | null>;
+  /** `base` is the file content the edit started from; the server merges in what changed since. */
+  readonly write: (date: DailyNoteDate, content: string, base: string) => Promise<DailyNote | null>;
 }
 
 /** A caret to restore with an undo step. */
@@ -49,12 +51,15 @@ interface DailyNotesState {
   readonly days: Readonly<Record<string, DayState>>;
   readonly focus: FocusRequest | null;
   readonly selection: BlockSelection | null;
+  /** Rows changed outside this client a moment ago, by node id. */
+  readonly recent: Readonly<Record<string, true>>;
 }
 
 export const useDailyNotesStore = create<DailyNotesState>(() => ({
   days: {},
   focus: null,
   selection: null,
+  recent: {},
 }));
 
 let io: DailyNotesIo | null = null;
@@ -67,18 +72,13 @@ export function setDailyNotesIo(next: DailyNotesIo | null) {
 }
 
 const SAVE_DELAY_MS = 500;
+const RECENT_MS = 1600;
 const HISTORY_LIMIT = 200;
 const COALESCE_MS = 1200;
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const savesInFlight = new Map<string, Promise<void>>();
 const lastCoalesce = new Map<string, { key: string; at: number }>();
 let focusNonce = 0;
-
-/** The day whose editor holds the caret; external file changes wait until it blurs. */
-let editingDate: string | null = null;
-export function setEditingDate(date: string | null) {
-  editingDate = date;
-}
 
 function getDay(date: string): DayState | undefined {
   return useDailyNotesStore.getState().days[date];
@@ -157,15 +157,51 @@ async function reloadDay(date: string) {
     return;
   }
   readFailures.delete(date);
-  // A local edit landed while this read was in flight; it wins and will be written back.
-  if (current.status === "ready" && serializeNote(current.tree) !== current.syncedContent) return;
-  setDay(date, {
-    ...current,
-    status: "ready",
-    tree: parseNote(note.content),
-    syncedAt: note.updatedAt,
-    syncedContent: note.content,
-  });
+  if (current.status !== "ready") {
+    setDay(date, {
+      ...current,
+      status: "ready",
+      tree: parseNote(note.content),
+      syncedAt: note.updatedAt,
+      syncedContent: note.content,
+    });
+    return;
+  }
+  // A local edit landed while this read was in flight; its save merges this change in.
+  if (serializeNote(current.tree) !== current.syncedContent) return;
+  if (note.content === current.syncedContent) {
+    setDay(date, { ...current, syncedAt: note.updatedAt });
+    return;
+  }
+  takeRemote(date, current, note.content, note.updatedAt, note.content);
+}
+
+let recentTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Shows `content`, the file as it is now, edited locally into `shown`. Rows
+ * keep their ids, so the caret stays put. Undo history goes: its steps would
+ * bring back what the other writer changed.
+ */
+function takeRemote(
+  date: string,
+  day: DayState,
+  content: string,
+  syncedAt: string | null,
+  shown: string,
+) {
+  const { tree, changed } = adoptIds(day.tree, parseNote(shown));
+  setDay(date, { ...day, tree, syncedAt, syncedContent: content, undo: [], redo: [] });
+  lastCoalesce.delete(date);
+  if (changed.size === 0) return;
+  const recent: Record<string, true> = {};
+  for (const id of changed) recent[id] = true;
+  useDailyNotesStore.setState({ recent });
+  if (recentTimer) clearTimeout(recentTimer);
+  recentTimer = setTimeout(() => {
+    recentTimer = null;
+    useDailyNotesStore.setState({ recent: {} });
+  }, RECENT_MS);
 }
 
 /** Folds in changes made outside this client (another window, an editor, an agent). */
@@ -173,7 +209,6 @@ export function applyServerSnapshot(snapshot: DailyNotesSnapshot) {
   const updatedAtByDate = new Map(snapshot.days.map((day) => [day.date, day.updatedAt]));
   for (const [date, day] of Object.entries(useDailyNotesStore.getState().days)) {
     if (day.status !== "ready" || saveTimers.has(date) || savesInFlight.has(date)) continue;
-    if (date === editingDate) continue;
     const updatedAt = updatedAtByDate.get(date) ?? null;
     if (updatedAt === day.syncedAt) continue;
     if (updatedAt === null && day.syncedContent.trim() === "") continue;
@@ -200,14 +235,24 @@ async function saveDay(date: string): Promise<void> {
   if (!day || io === null) return;
   const content = serializeNote(day.tree);
   if (content === day.syncedContent) return;
+  const base = day.syncedContent;
   const run = (async () => {
-    const result = await io!.write(date, content).catch(() => null);
+    const result = await io!.write(date, content, base).catch(() => null);
     const latest = getDay(date);
     if (result === null) {
       setTimeout(() => scheduleSave(date), 3_000);
       return;
     }
-    if (latest) setDay(date, { ...latest, syncedAt: result.updatedAt, syncedContent: content });
+    if (!latest) return;
+    if (result.content === content) {
+      setDay(date, { ...latest, syncedAt: result.updatedAt, syncedContent: content });
+      return;
+    }
+    // The server merged in a change made since `base`; fold it into what was typed meanwhile.
+    const local = serializeNote(latest.tree);
+    const shown = local === content ? result.content : mergeLines(content, local, result.content);
+    takeRemote(date, latest, result.content, result.updatedAt, shown);
+    if (shown !== result.content) scheduleSave(date);
   })();
   savesInFlight.set(date, run);
   try {

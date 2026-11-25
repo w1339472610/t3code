@@ -1105,6 +1105,40 @@ export function summarizeT3ToolCalls(
           );
       break;
     }
+    case "notes-read": {
+      const count = selected.length;
+      label = done
+        ? resolve(
+            msg(
+              "{count, plural, one {Read daily notes {count} time} other {Read daily notes {count} times}}",
+              { count },
+            ),
+          )
+        : resolve(
+            msg(
+              "{count, plural, one {Tried to read daily notes {count} time} other {Tried to read daily notes {count} times}}",
+              { count },
+            ),
+          );
+      break;
+    }
+    case "notes-edit": {
+      const count = selected.length;
+      label = done
+        ? resolve(
+            msg(
+              "{count, plural, one {Edited daily notes {count} time} other {Edited daily notes {count} times}}",
+              { count },
+            ),
+          )
+        : resolve(
+            msg(
+              "{count, plural, one {Tried to edit daily notes {count} time} other {Tried to edit daily notes {count} times}}",
+              { count },
+            ),
+          );
+      break;
+    }
     case "environment-update": {
       const count = selected.length;
       label = done

@@ -14,4 +14,6 @@ Switch between **Document**, **Day**, **Week**, and **Month** at the top. Docume
 - Type `@` to mention a thread. Mentions show the thread's live title and status; click one to open it. You can also drag threads from the sidebar between two notes.
 - Select a single note and choose **Start a thread** to open a new thread with the note as its message. Once you send it, the note becomes a mention of the new thread and its children fold under it.
 
-Each day is a Markdown file named `YYYY-MM-DD.md`, kept by the machine you are connected to, in the `notes` folder of T3 Code's data folder. Change the folder in **Settings → General → Daily notes**, for example to a folder in an Obsidian vault. Edits made to the files elsewhere, by you or by an agent, show up in T3 Code while the day is not being edited.
+Each day is a Markdown file named `YYYY-MM-DD.md`, kept by the machine you are connected to, in the `notes` folder of T3 Code's data folder. Change the folder in **Settings → General → Daily notes**, for example to a folder in an Obsidian vault. Edits made to the files elsewhere show up in T3 Code right away, even in the day you are typing in: changes to different lines are merged, and the lines that changed light up for a moment.
+
+Agents in any thread can read and edit your daily notes. Ask in plain words, such as "mark the weekly report done in today's notes" or "summarize what I did this week from my notes", and the agent reads the days it needs and changes only the lines you asked about. Its edits appear in open notes as it makes them.

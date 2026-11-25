@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  adoptIds,
   indentNode,
   locate,
   moveNodes,
   type NoteNode,
+  type NoteTree,
   outdentNode,
   parseNote,
   serializeNote,
@@ -122,3 +124,21 @@ describe("tree edits", () => {
     expect(right).toEqual([{ kind: "text", text: "cd" }]);
   });
 });
+
+describe("adoptIds", () => {
+  it("keeps the ids of unchanged and edited lines, and reports what changed", () => {
+    const previous = parseNote("- a\n- b\n  - b1\n- c\n");
+    const [a, b, c] = previous;
+    const next = parseNote("- a\n- b edited\n  - b1\n- new\n- c\n");
+    const { tree, changed } = adoptIds(previous, next);
+    expect(tree.map((node) => node.id)).toEqual([a!.id, b!.id, tree[2]!.id, c!.id]);
+    expect(tree[1]!.children[0]!.id).toBe(b!.children[0]!.id);
+    expect(serializeNote(tree)).toBe("- a\n- b edited\n  - b1\n- new\n- c\n");
+    expect([...changed]).toEqual([b!.id, tree[2]!.id]);
+    expect(new Set(flattenIds(tree)).size).toBe(5);
+  });
+});
+
+function flattenIds(tree: NoteTree): string[] {
+  return tree.flatMap((node) => [node.id, ...flattenIds(node.children)]);
+}

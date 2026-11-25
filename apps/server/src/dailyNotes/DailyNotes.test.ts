@@ -106,6 +106,96 @@ it.layer(NodeServices.layer)("daily notes", (it) => {
     ),
   );
 
+  it.effect("merges a write with changes made since its base", () =>
+    withNotes(
+      () =>
+        Effect.gen(function* () {
+          const notes = yield* DailyNotes.DailyNotes;
+          yield* notes.edit({ date: "2026-11-23", append: "- [ ] from agent" });
+          const merged = yield* notes.write({
+            date: "2026-11-23",
+            base: "- a\n- b\n",
+            content: "- a typed\n- b\n",
+          });
+          assert.equal(merged.content, "- a typed\n- b\n- [ ] from agent\n");
+          assert.equal((yield* notes.read("2026-11-23")).content, merged.content);
+        }),
+      { seed: { "2026-11-23.md": "- a\n- b\n" } },
+    ),
+  );
+
+  it.effect("edits a day by exact replacement, append, or a versioned rewrite", () =>
+    withNotes(
+      () =>
+        Effect.gen(function* () {
+          const notes = yield* DailyNotes.DailyNotes;
+          const date = "2026-11-23";
+          const replaced = yield* notes.edit({
+            date,
+            edits: [{ oldText: "- [ ] 写周报", newText: "- [x] 写周报" }],
+            append: "- 新条目",
+          });
+          assert.equal(replaced.content, "- [x] 写周报\n- 评审\n- 评审\n- 新条目\n");
+          assert.equal(replaced.version, DailyNotes.noteVersion(replaced.content));
+
+          const failure = (input: Parameters<typeof notes.edit>[0]) =>
+            Effect.map(Effect.flip(notes.edit(input)), (error) => error.message);
+          assert.include(
+            yield* failure({ date, edits: [{ oldText: "- 不存在", newText: "" }] }),
+            "Not found",
+          );
+          assert.include(
+            yield* failure({ date, edits: [{ oldText: "- 评审", newText: "- 复盘" }] }),
+            "appears 2 times",
+          );
+          assert.include(yield* failure({ date, content: "- 全部重写\n" }), "changed since");
+          // A failed edit changes nothing.
+          assert.equal((yield* notes.read(date)).content, replaced.content);
+
+          const rewritten = yield* notes.edit({
+            date,
+            content: "- 全部重写\n",
+            version: replaced.version,
+          });
+          assert.equal((yield* notes.read(date)).content, rewritten.content);
+          // A new day needs no version.
+          yield* notes.edit({ date: "2026-11-24", content: "- 明天\n" });
+        }),
+      { seed: { "2026-11-23.md": "- [ ] 写周报\n- 评审\n- 评审\n" } },
+    ),
+  );
+
+  it.effect("browses dated days within a range and searches every day", () =>
+    withNotes(
+      () =>
+        Effect.gen(function* () {
+          const notes = yield* DailyNotes.DailyNotes;
+          const range = yield* notes.browse({ from: "2026-11-01", to: "2026-11-22" });
+          assert.deepEqual(
+            range.days.map((day) => [day.date, day.content]),
+            [
+              ["2026-11-22", "- 发布\n"],
+              ["2026-11-02", "- 周会\n  - 发布计划\n"],
+            ],
+          );
+          assert.deepEqual(range.moreDates, []);
+          const found = yield* notes.browse({ query: "发布" });
+          assert.deepEqual(found.matches, [
+            { date: "2026-11-22", line: 1, text: "- 发布" },
+            { date: "2026-11-02", line: 2, text: "  - 发布计划" },
+          ]);
+        }),
+      {
+        seed: {
+          "2026-11-23.md": "- 今天\n",
+          "2026-11-22.md": "- 发布\n",
+          "2026-11-02.md": "- 周会\n  - 发布计划\n",
+          "2026-10-31.md": "- 上月\n",
+        },
+      },
+    ),
+  );
+
   it.effect("uses the folder from settings, expanding a leading ~", () =>
     withNotes(
       (baseDir) =>

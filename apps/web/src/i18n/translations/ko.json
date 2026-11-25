@@ -12941,5 +12941,13 @@
   "724666b26cda8691": "Remove link",
   "0fdf0f543a382369": "Link address",
   "37a429403eb2ce81": "Paste or type a link",
-  "e321d312eb7386a8": "Apply"
+  "e321d312eb7386a8": "Apply",
+  "a20c06161d145ebc": "{count, plural, one {Read daily notes {count} time} other {Read daily notes {count} times}}",
+  "b2df4d199dddc557": "{count, plural, one {Tried to read daily notes {count} time} other {Tried to read daily notes {count} times}}",
+  "5213f24ff7c1f056": "{count, plural, one {Edited daily notes {count} time} other {Edited daily notes {count} times}}",
+  "97a75b59375782c2": "{count, plural, one {Tried to edit daily notes {count} time} other {Tried to edit daily notes {count} times}}",
+  "52e1fc8e9217f98e": "{status, select, inProgress {Reading daily notes} completed {Read daily notes} failed {Failed to read daily notes} declined {Declined to read daily notes} stopped {Stopped reading daily notes} other {Reading daily notes}}",
+  "4ed47d40b5331942": "{status, select, inProgress {Editing daily notes} completed {Edited daily notes} failed {Failed to edit daily notes} declined {Declined to edit daily notes} stopped {Stopped editing daily notes} other {Editing daily notes}}",
+  "2ae7284241b9c372": "Read daily notes",
+  "92f3b8a790dfbab4": "Edit daily notes"
 }

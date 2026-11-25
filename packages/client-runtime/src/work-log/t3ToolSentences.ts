@@ -714,6 +714,22 @@ const T3_TOOL_SENTENCES: ReadonlyMap<string, T3ToolSentence> = new Map<string, T
     },
   ],
   [
+    "Read\nReading\nRead\ndaily notes",
+    {
+      detail: msg(
+        "{status, select, inProgress {Reading daily notes} completed {Read daily notes} failed {Failed to read daily notes} declined {Declined to read daily notes} stopped {Stopped reading daily notes} other {Reading daily notes}}",
+      ),
+    },
+  ],
+  [
+    "Edit\nEditing\nEdited\ndaily notes",
+    {
+      detail: msg(
+        "{status, select, inProgress {Editing daily notes} completed {Edited daily notes} failed {Failed to edit daily notes} declined {Declined to edit daily notes} stopped {Stopped editing daily notes} other {Editing daily notes}}",
+      ),
+    },
+  ],
+  [
     "Read\nReading\nRead\nenvironment preferences",
     {
       detail: msg(

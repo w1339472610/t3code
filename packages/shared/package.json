@@ -607,6 +607,10 @@
       "types": "./src/atomicWrite.ts",
       "import": "./src/atomicWrite.ts"
     },
+    "./lineMerge": {
+      "types": "./src/lineMerge.ts",
+      "import": "./src/lineMerge.ts"
+    },
     "./mcpResponsePayloads": {
       "types": "./src/mcpResponsePayloads.ts",
       "import": "./src/mcpResponsePayloads.ts"

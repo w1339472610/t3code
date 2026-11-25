@@ -5626,5 +5626,13 @@
   "eb287395a09cd288": "发送连接追踪",
   "6787f93bbf6ce0b6": "帮助 T3 Code 团队修复连接问题。追踪数据包含耗时、错误类型、此应用会话的 ID 和应用版本，绝不包含你的线程、提示词或代码。可在 设置 > 关于 T3 Code > 诊断 中更改。",
   "0b1e4aecbd38e0cf": "当应用通过 {product} 连接到电脑时，会向 T3 Code 团队发送每一步的耗时、错误类型、此应用会话的 ID 和应用版本。追踪数据绝不包含你的线程、提示词或代码。",
-  "e0856d6a402ad821": "{organization} 的策略不允许使用项目的工作树布局命令。"
+  "e0856d6a402ad821": "{organization} 的策略不允许使用项目的工作树布局命令。",
+  "a20c06161d145ebc": "{count, plural, other {已读取每日笔记 {count} 次}}",
+  "b2df4d199dddc557": "{count, plural, other {尝试读取每日笔记 {count} 次}}",
+  "5213f24ff7c1f056": "{count, plural, other {已编辑每日笔记 {count} 次}}",
+  "97a75b59375782c2": "{count, plural, other {尝试编辑每日笔记 {count} 次}}",
+  "52e1fc8e9217f98e": "{status, select, inProgress {正在读取每日笔记} completed {已读取每日笔记} failed {读取每日笔记失败} declined {已拒绝读取每日笔记} stopped {已停止读取每日笔记} other {正在读取每日笔记}}",
+  "4ed47d40b5331942": "{status, select, inProgress {正在编辑每日笔记} completed {已编辑每日笔记} failed {编辑每日笔记失败} declined {已拒绝编辑每日笔记} stopped {已停止编辑每日笔记} other {正在编辑每日笔记}}",
+  "2ae7284241b9c372": "读取每日笔记",
+  "92f3b8a790dfbab4": "编辑每日笔记"
 }
