@@ -1,4 +1,5 @@
 import { EasDeviceHostConfigs, SimlockDeviceHostConfigs, SshDeviceHostConfigs } from "./device.ts";
+import { PluginId, PluginSettingsEntry } from "./plugins.ts";
 import {
   AuthOrchestrationOperateScope,
   AuthAccessWriteScope,
@@ -1650,6 +1651,9 @@ export const ServerSettings = Schema.Struct({
   secretProviders: Schema.Record(SecretProviderId, SecretProviderConfig).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  plugins: Schema.Record(PluginId, PluginSettingsEntry).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
 
   usageHistoryRetentionDays: UsageHistoryRetentionDays.pipe(
     Schema.withDecodingDefault(Effect.succeed(92)),
@@ -2057,6 +2061,8 @@ export const ServerSettingsPatch = Schema.Struct({
   usageModelAliases: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
   ),
+  // Merge per plugin; null removes an entry.
+  plugins: Schema.optionalKey(Schema.Record(PluginId, Schema.NullOr(PluginSettingsEntry))),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

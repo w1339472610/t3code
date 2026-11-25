@@ -1226,3 +1226,142 @@ it.effect("a run interrupted right after it reserves the task does not block the
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
+
+it.effect(
+  "lists runs in range from the messages tasks sent, newest first, with their run status",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const layer = ScheduledTaskService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            ManagedPolicy.layerTest(),
+            Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+            Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+            Layer.mock(SecretRequests.SecretRequests)({}),
+            Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+              namedProjectsRoot: "/projects",
+              isScratchProject: () => Effect.succeed(false),
+            }),
+            NodeCrypto.layer,
+            Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void }),
+          ),
+        ),
+      );
+      const thread = (id: string, deletedAt: string | null) =>
+        sql`INSERT INTO orchestration_v2_projection_threads ${sql.insert({
+          thread_id: id,
+          project_id: "project:test",
+          title: `Title ${id}`,
+          default_provider: "codex",
+          runtime_mode: "full-access",
+          interaction_mode: "default",
+          created_at: "2026-11-01T00:00:00.000Z",
+          updated_at: "2026-11-01T00:00:00.000Z",
+          deleted_at: deletedAt,
+          payload_json: "{}",
+        })}`;
+      const message = (input: {
+        id: string;
+        threadId: string;
+        taskId: string | null;
+        at: string;
+        runId: string | null;
+      }) =>
+        sql`INSERT INTO orchestration_v2_projection_messages ${sql.insert({
+          message_id: input.id,
+          thread_id: input.threadId,
+          run_id: input.runId,
+          role: "user",
+          streaming: 0,
+          created_at: input.at,
+          updated_at: input.at,
+          payload_json: JSON.stringify(
+            input.taskId === null ? {} : { scheduledTaskId: input.taskId },
+          ),
+        })}`;
+      const run = (id: string, threadId: string, status: string, completedAt: string | null) =>
+        sql`INSERT INTO orchestration_v2_projection_runs ${sql.insert({
+          run_id: id,
+          thread_id: threadId,
+          ordinal: Number(id.slice(-1)),
+          provider: "codex",
+          status,
+          requested_at: "2026-11-13T01:00:00.000Z",
+          completed_at: completedAt,
+          payload_json: "{}",
+        })}`;
+      yield* thread("thread:a", null);
+      yield* thread("thread:gone", "2026-11-13T05:00:00.000Z");
+      yield* run("run:a:1", "thread:a", "failed", "2026-11-13T01:02:00.000Z");
+      yield* run("run:a:2", "thread:a", "completed", "2026-11-13T12:40:00.000Z");
+      const fired = "scheduled-task-message:task:daily";
+      yield* message({
+        id: `${fired}:1794531600000:scheduled`,
+        threadId: "thread:a",
+        taskId: "task:daily",
+        at: "2026-11-13T01:00:00.000Z",
+        runId: "run:a:1",
+      });
+      yield* message({
+        id: `${fired}:1794573120000:manual`,
+        threadId: "thread:a",
+        taskId: "task:daily",
+        at: "2026-11-13T12:32:00.000Z",
+        runId: "run:a:2",
+      });
+      yield* message({
+        id: `${fired}:webhook:delivery-1`,
+        threadId: "thread:a",
+        taskId: "task:daily",
+        at: "2026-11-13T13:00:00.000Z",
+        runId: null,
+      });
+      // Out of range, in a deleted thread, or not sent by a task.
+      yield* message({
+        id: `${fired}:1794358800000:scheduled`,
+        threadId: "thread:a",
+        taskId: "task:daily",
+        at: "2026-11-11T01:00:00.000Z",
+        runId: null,
+      });
+      yield* message({
+        id: `${fired}:1794535200000:scheduled`,
+        threadId: "thread:gone",
+        taskId: "task:daily",
+        at: "2026-11-13T02:00:00.000Z",
+        runId: null,
+      });
+      yield* message({
+        id: "message:typed",
+        threadId: "thread:a",
+        taskId: null,
+        at: "2026-11-13T03:00:00.000Z",
+        runId: null,
+      });
+
+      const result = yield* Effect.gen(function* () {
+        const service = yield* ScheduledTaskService.ScheduledTaskService;
+        return yield* service.listRuns({
+          from: "2026-11-13T00:00:00+08:00",
+          to: "2026-11-14T00:00:00Z",
+        });
+      }).pipe(Effect.provide(layer));
+
+      assert.isFalse(result.truncated);
+      assert.deepEqual(
+        result.runs.map((entry) => [
+          entry.trigger,
+          entry.status,
+          entry.startedAt,
+          entry.completedAt,
+        ]),
+        [
+          ["webhook", "pending", "2026-11-13T13:00:00.000Z", null],
+          ["manual", "completed", "2026-11-13T12:32:00.000Z", "2026-11-13T12:40:00.000Z"],
+          ["scheduled", "failed", "2026-11-13T01:00:00.000Z", "2026-11-13T01:02:00.000Z"],
+        ],
+      );
+      assert.equal(result.runs[0]?.threadTitle, "Title thread:a");
+    }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);

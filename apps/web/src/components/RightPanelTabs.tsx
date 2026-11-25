@@ -53,6 +53,7 @@ import {
   Globe2,
   MessagesSquare,
   Plus,
+  Puzzle,
   TerminalSquare,
   Volume2Icon,
   VolumeOffIcon,
@@ -114,6 +115,7 @@ import { dispatchPreviewAction } from "./preview/previewActionBus";
 import { preventThumbButtonFocus, takeThumbButtonNavigation } from "./preview/thumbButtons";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
+import type { PluginPanelLauncher } from "./plugins/pluginBridge";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
 import { surfaceShortcutKey } from "~/lib/surfaceShortcutKey";
@@ -162,6 +164,8 @@ export interface RightPanelTabsProps {
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
   onAddDailyNotes?: (() => void) | undefined;
+  pluginPanels?: ReadonlyArray<PluginPanelLauncher> | undefined;
+  onAddPlugin?: ((launcher: PluginPanelLauncher) => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -185,6 +189,21 @@ export interface PullRequestTabStatus {
 }
 
 export type PullRequestTabStatusSeed = Pick<PullRequestTabStatus, "state" | "isDraft">;
+
+function pluginSurfaceActions(
+  launchers: ReadonlyArray<PluginPanelLauncher>,
+  onAddPlugin: ((launcher: PluginPanelLauncher) => void) | undefined,
+) {
+  if (onAddPlugin === undefined) return [];
+  return launchers.map((launcher) => ({
+    label: launcher.title,
+    icon: Puzzle,
+    shortcut: launcher.shortcut ?? "",
+    available: true,
+    disabledReason: "",
+    onClick: () => onAddPlugin(launcher),
+  }));
+}
 
 function shouldOpenDefaultBrowserProfileFromMenuClick(pointerType: string | undefined): boolean {
   return pointerType !== "touch";
@@ -326,10 +345,10 @@ function SurfaceMenuItem(props: {
       className={!props.available ? "data-disabled:pointer-events-auto" : undefined}
       onClick={props.onClick}
       disabled={!props.available}
-      aria-keyshortcuts={props.shortcut}
+      aria-keyshortcuts={props.shortcut || undefined}
     >
       {props.children}
-      <MenuShortcut>{props.shortcut}</MenuShortcut>
+      {props.shortcut ? <MenuShortcut>{props.shortcut}</MenuShortcut> : null}
     </MenuItem>
   );
   if (props.available || !props.disabledReason) return item;
@@ -349,6 +368,8 @@ function RightPanelEmptyState(props: {
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
   onAddDailyNotes?: (() => void) | undefined;
+  pluginPanels: ReadonlyArray<PluginPanelLauncher>;
+  onAddPlugin: ((launcher: PluginPanelLauncher) => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -447,6 +468,7 @@ function RightPanelEmptyState(props: {
           },
         ]
       : []),
+    ...pluginSurfaceActions(props.pluginPanels, props.onAddPlugin),
   ] as const;
 
   type SurfaceAction = (typeof actions)[number];
@@ -556,7 +578,7 @@ function RightPanelEmptyState(props: {
                   >
                     {messages(action.label)}
                   </span>
-                  <Kbd>{action.shortcut}</Kbd>
+                  {action.shortcut ? <Kbd>{action.shortcut}</Kbd> : null}
                 </button>
                 {action.label === "Browser" && props.browserProfiles.length > 1 ? (
                   <Menu>
@@ -597,7 +619,7 @@ function RightPanelEmptyState(props: {
                   >
                     {actionIcon(action, "size-4")}
                     <span className="min-w-0 flex-1 truncate">{messages(action.label)}</span>
-                    <Kbd>{action.shortcut}</Kbd>
+                    {action.shortcut ? <Kbd>{action.shortcut}</Kbd> : null}
                   </div>
                 }
               />
@@ -648,6 +670,8 @@ function surfaceTitle(
         surface,
         resolve(msg("Thread on {label}", { label: surface.label })),
       );
+    case "plugin":
+      return surface.title;
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return resolve(msg("Browser"));
@@ -744,6 +768,8 @@ function SurfaceIcon({
       return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
     case "linked-thread":
       return <MessagesSquare className="size-3 shrink-0" />;
+    case "plugin":
+      return <Puzzle className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -1304,6 +1330,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           },
         ]
       : []),
+    ...pluginSurfaceActions(props.pluginPanels ?? [], props.onAddPlugin),
   ] as const;
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -1730,6 +1757,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddDevice={props.onAddDevice}
             onAddSideChat={props.onAddSideChat}
             onAddDailyNotes={props.onAddDailyNotes}
+            pluginPanels={props.pluginPanels ?? []}
+            onAddPlugin={props.onAddPlugin}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}

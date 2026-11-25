@@ -14,6 +14,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { lazy, Suspense } from "react";
 import { LinkedThreadPane } from "./LinkedThreadPane";
 import SideThreadPane from "./SideThreadPane";
+import { PluginPanel } from "../plugins/PluginPanel";
 import type { ComposerImageAttachment, DraftId } from "../../composerDraftStore";
 import type { ShortcutMatchContext } from "../../keybindings";
 import type { SideChatParentPanel } from "../../lib/sideChatPane";
@@ -253,6 +254,15 @@ export function RightPanelSurfaceContent(props: {
           panelRef={threadRef}
           surface={surface}
           visible={visible && props.activeSurfaceId === surface.id}
+        />
+      );
+    case "plugin":
+      return (
+        <PluginPanel
+          environmentId={props.environmentId}
+          threadRef={threadRef}
+          surface={surface}
+          workspaceRoot={props.files.workspaceRoot}
         />
       );
     case "device":

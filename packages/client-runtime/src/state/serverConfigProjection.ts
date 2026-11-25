@@ -172,6 +172,15 @@ export function applyServerConfigProjection(
         latestEvent: event,
         source: "live",
       }));
+    case "pluginsUpdated":
+      return Option.map(current, (projection) => ({
+        config: {
+          ...projection.config,
+          plugins: reuseUnchanged(projection.config.plugins, event.payload),
+        },
+        latestEvent: event,
+        source: "live",
+      }));
     case "usageLimitSourcesUpdated":
       return Option.map(current, (projection) => ({
         config: {

@@ -4,7 +4,9 @@ import {
   CommandId,
   ForwardCompatibleArray,
   IsoDateTime,
+  MessageId,
   ProjectId,
+  RunId,
   ScheduledTaskId,
   SecretRef,
   ThreadId,
@@ -14,6 +16,7 @@ import { ModelSelection } from "./modelSelection.ts";
 import {
   OrchestrationV2Actor,
   OrchestrationV2CreationSource,
+  OrchestrationV2RunStatus,
   OrchestrationV2ThreadLaunchWorkspaceStrategy,
 } from "./orchestrationV2.ts";
 import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
@@ -275,6 +278,47 @@ export const ScheduledTaskListResult = Schema.Struct({
   timeZone: Schema.optional(TrimmedNonEmptyString),
 });
 export type ScheduledTaskListResult = typeof ScheduledTaskListResult.Type;
+
+export const ScheduledTaskRunTrigger = Schema.Literals([
+  "scheduled",
+  "manual",
+  "webhook",
+  "unknown",
+]);
+export type ScheduledTaskRunTrigger = typeof ScheduledTaskRunTrigger.Type;
+
+/** One prompt a task sent, and the agent run it became. */
+export const ScheduledTaskRunRecord = Schema.Struct({
+  taskId: ScheduledTaskId,
+  threadId: ThreadId,
+  threadTitle: Schema.String,
+  messageId: MessageId,
+  /** Null while the message waits in the thread's queue. */
+  runId: Schema.NullOr(RunId),
+  trigger: ScheduledTaskRunTrigger,
+  startedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+  // Any string, so a run status added later doesn't break a client's whole list.
+  status: Schema.Union([Schema.Literal("pending"), OrchestrationV2RunStatus, Schema.String]),
+});
+export type ScheduledTaskRunRecord = typeof ScheduledTaskRunRecord.Type;
+
+export const ScheduledTaskListRunsInput = Schema.Struct({
+  from: IsoDateTime,
+  to: IsoDateTime,
+});
+export type ScheduledTaskListRunsInput = typeof ScheduledTaskListRunsInput.Type;
+
+export const MAX_SCHEDULED_TASK_RUNS_LISTED = 2000;
+
+export const ScheduledTaskListRunsResult = Schema.Struct({
+  /** The server's IANA zone; fixed-time schedules fire on its wall clock. */
+  timeZone: Schema.String,
+  /** Runs that started in [from, to), newest first, at most `MAX_SCHEDULED_TASK_RUNS_LISTED`. */
+  runs: ForwardCompatibleArray(ScheduledTaskRunRecord),
+  truncated: Schema.Boolean,
+});
+export type ScheduledTaskListRunsResult = typeof ScheduledTaskListRunsResult.Type;
 
 export const ScheduledTaskUpsertInput = Schema.Struct({
   id: Schema.optional(ScheduledTaskId),

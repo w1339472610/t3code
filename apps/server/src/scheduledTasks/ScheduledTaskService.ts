@@ -2,6 +2,7 @@ import {
   CommandId,
   MessageId,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  RunId,
   type ProjectId,
   ScheduledTask,
   ScheduledTaskError,
@@ -18,6 +19,10 @@ import {
   type ScheduledTaskWebhookDeliveryOutcome,
   type ScheduledTaskWebhookFilter,
   type ScheduledTaskListResult,
+  type ScheduledTaskListRunsInput,
+  type ScheduledTaskListRunsResult,
+  type ScheduledTaskRunTrigger,
+  MAX_SCHEDULED_TASK_RUNS_LISTED,
   type ScheduledTaskMutationResult,
   type ScheduledTaskRunNowInput,
   type ScheduledTaskRunNowResult,
@@ -304,6 +309,10 @@ export class ScheduledTaskService extends Context.Service<
     readonly getWebhookDelivery: (
       input: ScheduledTaskGetWebhookDeliveryInput,
     ) => Effect.Effect<ScheduledTaskGetWebhookDeliveryResult, ScheduledTaskError>;
+    /** Prompts tasks sent in a time range, read from the messages they left in threads. */
+    readonly listRuns: (
+      input: ScheduledTaskListRunsInput,
+    ) => Effect.Effect<ScheduledTaskListRunsResult, ScheduledTaskError>;
     /** Verifies, logs and dispatches; returns after logging while the run continues in the background. */
     readonly triggerWebhook: (
       request: WebhookTriggerRequest,
@@ -333,6 +342,29 @@ const UNSUCCESSFUL_RUN_ERRORS = {
   rolled_back: "The run was rolled back.",
 } as const;
 const localNow = DateTime.withCurrentZoneLocal(DateTime.nowInCurrentZone);
+
+const RUN_MESSAGE_PREFIX = "scheduled-task-message:";
+
+/** Reads the trigger back out of the message id `runTask` minted for a fire. */
+function scheduledRunTrigger(messageId: string, taskId: string): ScheduledTaskRunTrigger {
+  const key = `${RUN_MESSAGE_PREFIX}${taskId}:`;
+  if (!messageId.startsWith(key)) return "unknown";
+  const rest = messageId.slice(key.length);
+  if (rest.startsWith("webhook:")) return "webhook";
+  const trigger = /^\d+:(scheduled|manual)$/.exec(rest)?.[1];
+  return trigger === "scheduled" || trigger === "manual" ? trigger : "unknown";
+}
+
+interface ScheduledRunRow {
+  readonly message_id: string;
+  readonly thread_id: string;
+  readonly thread_title: string;
+  readonly task_id: string;
+  readonly created_at: string;
+  readonly run_id: string | null;
+  readonly run_status: string | null;
+  readonly completed_at: string | null;
+}
 
 function nextRunAt(
   task: Pick<ScheduledTask, "enabled" | "schedule">,
@@ -1849,6 +1881,52 @@ export const layer = Layer.effect(
         ),
       );
 
+    const listRuns: ScheduledTaskService["Service"]["listRuns"] = Effect.fn(
+      "ScheduledTaskService.listRuns",
+    )(function* (input) {
+      const from = DateTime.make(input.from);
+      const to = DateTime.make(input.to);
+      if (Option.isNone(from) || Option.isNone(to)) {
+        return yield* taskError("Expected ISO dates for the run range.");
+      }
+      // The message id prefix keeps this an index range scan instead of a pass over every message.
+      const rows = yield* sql<ScheduledRunRow>`
+        SELECT m.message_id, m.thread_id, t.title AS thread_title, m.created_at,
+          json_extract(m.payload_json, '$.scheduledTaskId') AS task_id,
+          m.run_id, r.status AS run_status, r.completed_at
+        FROM orchestration_v2_projection_messages m
+        JOIN orchestration_v2_projection_threads t
+          ON t.thread_id = m.thread_id AND t.deleted_at IS NULL
+        LEFT JOIN orchestration_v2_projection_runs r ON r.run_id = m.run_id
+        WHERE m.message_id >= ${RUN_MESSAGE_PREFIX}
+          AND m.message_id < ${`${RUN_MESSAGE_PREFIX.slice(0, -1)};`}
+          AND m.role = 'user'
+          AND m.created_at >= ${iso(from.value)}
+          AND m.created_at < ${iso(to.value)}
+          AND json_extract(m.payload_json, '$.scheduledTaskId') IS NOT NULL
+        ORDER BY m.created_at DESC
+        LIMIT ${MAX_SCHEDULED_TASK_RUNS_LISTED + 1}
+      `.pipe(
+        NodeSqliteClient.readOnly,
+        Effect.mapError((cause) => taskError("Could not list scheduled task runs.", { cause })),
+      );
+      return {
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        truncated: rows.length > MAX_SCHEDULED_TASK_RUNS_LISTED,
+        runs: rows.slice(0, MAX_SCHEDULED_TASK_RUNS_LISTED).map((row) => ({
+          taskId: ScheduledTaskId.make(row.task_id),
+          threadId: ThreadId.make(row.thread_id),
+          threadTitle: row.thread_title,
+          messageId: MessageId.make(row.message_id),
+          runId: row.run_id === null ? null : RunId.make(row.run_id),
+          trigger: scheduledRunTrigger(row.message_id, row.task_id),
+          startedAt: row.created_at,
+          completedAt: row.completed_at,
+          status: row.run_id === null ? "pending" : (row.run_status ?? "pending"),
+        })),
+      };
+    });
+
     const getWebhookDelivery: ScheduledTaskService["Service"]["getWebhookDelivery"] = Effect.fn(
       "ScheduledTaskService.getWebhookDelivery",
     )(function* (input) {
@@ -2704,6 +2782,7 @@ export const layer = Layer.effect(
       rotateWebhookToken,
       listWebhookDeliveries,
       getWebhookDelivery,
+      listRuns,
       triggerWebhook,
     });
   }),

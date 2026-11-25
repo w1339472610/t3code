@@ -724,6 +724,19 @@ describe("serverSettings helpers", () => {
     expect(current.usagePriceOverrides["example-model"]?.cacheReadCostPerMillionTokens).toBe(0.5);
   });
 
+  it("saves one plugin's choices without clobbering another plugin's", () => {
+    const current = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      plugins: { progress: { config: { showRelated: false } } },
+    });
+    const added = applyServerSettingsPatch(current, { plugins: { notes: { enabled: false } } });
+    expect(added.plugins).toEqual({
+      progress: { config: { showRelated: false } },
+      notes: { enabled: false },
+    });
+    const removed = applyServerSettingsPatch(added, { plugins: { progress: null } });
+    expect(removed.plugins).toEqual({ notes: { enabled: false } });
+  });
+
   it("stores background activity profiles as a versioned object and syncs legacy aliases", () => {
     const next = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       backgroundActivity: {

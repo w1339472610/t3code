@@ -92,6 +92,13 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
         (surface.title === null || typeof surface.title === "string") &&
         decodeLinkedThreadSurface(surface)?.id === surface.id
       );
+    case "plugin":
+      return (
+        typeof surface.pluginId === "string" &&
+        typeof surface.panelId === "string" &&
+        typeof surface.title === "string" &&
+        surface.id === `plugin:${surface.pluginId}:${surface.panelId}`
+      );
     case "pull-request":
       return (
         typeof surface.projectId === "string" &&

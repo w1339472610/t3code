@@ -88,6 +88,7 @@ import { AuthOrchestrationOperateScope, clampManagedRuntimeMode } from "@t3tools
 import { resolvePastedPath } from "@t3tools/shared/path";
 import { useManagedPolicy } from "~/state/managedPolicy";
 import { ManagedNotice } from "../ManagedPolicy";
+import { PluginPageIconGlyph, usePrimaryPluginPages } from "../plugins/pluginPages";
 import { readEnvironmentScope } from "~/state/session";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { EnvironmentRow, useEnvironmentTransportLabel } from "./EnvironmentRow";
@@ -457,6 +458,8 @@ export function ScheduledTasksSettings(target: {
   const permittedEnvironments = connectedEnvironments.filter(
     (_entry, index) => createPermissions[index],
   );
+  // Plugin pages that read scheduled tasks are other views of this list.
+  const scheduleViews = usePrimaryPluginPages().filter((page) => page.readsScheduledTasks);
   const creationEnvironment =
     permittedEnvironments.find(
       (entry) => entry.environmentId === defaultEnvironment?.environmentId,
@@ -467,18 +470,36 @@ export function ScheduledTasksSettings(target: {
         {...setting("scheduled-tasks")}
         variant="plain"
         headerAction={
-          <Button
-            size="xs"
-            variant="ghost-muted"
-            disabled={!creationEnvironment}
-            onClick={() =>
-              creationEnvironment &&
-              setEditor({ environmentId: creationEnvironment.environmentId, task: null })
-            }
-          >
-            <PlusIcon className="size-3" />
-            <T>New task</T>
-          </Button>
+          <div className="flex items-center gap-1">
+            {scheduleViews.map((page) => (
+              <Button
+                key={`${page.pluginId}:${page.pageId}`}
+                size="xs"
+                variant="ghost-muted"
+                render={
+                  <Link
+                    to="/plugins/$pluginId/$pageId"
+                    params={{ pluginId: page.pluginId, pageId: page.pageId }}
+                  />
+                }
+              >
+                <PluginPageIconGlyph icon={page.icon} />
+                {page.title}
+              </Button>
+            ))}
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              disabled={!creationEnvironment}
+              onClick={() =>
+                creationEnvironment &&
+                setEditor({ environmentId: creationEnvironment.environmentId, task: null })
+              }
+            >
+              <PlusIcon className="size-3" />
+              <T>New task</T>
+            </Button>
+          </div>
         }
       >
         {scope.kind === "unavailable" ? (

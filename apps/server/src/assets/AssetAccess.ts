@@ -54,6 +54,7 @@ import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
 import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import { findThemeBackground } from "../environmentTheme.ts";
+import * as Plugins from "../plugins/Plugins.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
@@ -910,6 +911,23 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         expiresAt,
       };
       fileName = `${input.resource.themeId}-background`;
+      break;
+    }
+    case "plugin-file": {
+      const pluginRoot = yield* Plugins.resolvePluginRoot(input.resource.pluginId);
+      if (pluginRoot === null) {
+        return yield* new AssetWorkspaceContextNotFoundError({ resource: input.resource });
+      }
+      const finalized = yield* finalizeWorkspaceFileAsset({
+        workspaceRoot: pluginRoot,
+        requestedPath: input.resource.path,
+        resource: input.resource,
+        expiresAt,
+      });
+      claims = finalized.claims;
+      fileName = finalized.fileName;
+      imageDimensions = finalized.imageDimensions;
+      fileRevision = finalized.fileRevision;
       break;
     }
     case "native-app-icon": {

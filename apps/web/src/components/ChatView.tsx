@@ -295,8 +295,14 @@ import {
   useThreadStatus,
   useThreadHistory,
   useQuietThreadShell,
+  useServerConfigs,
   useThreadCheckpointSummaries,
 } from "../state/entities";
+import {
+  enabledPlugins,
+  pluginPanelLaunchers,
+  type PluginPanelLauncher,
+} from "./plugins/pluginBridge";
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
@@ -2578,6 +2584,14 @@ export default function ChatView(props: ChatViewProps) {
     closeRightPanelSurface,
   });
   const pullRequestSurfaceAvailable = supportsPullRequests && pullRequestPanelTarget !== null;
+  const serverConfigs = useServerConfigs();
+  const pluginLaunchers = pluginPanelLaunchers(
+    enabledPlugins(activeThreadRef ? serverConfigs.get(activeThreadRef.environmentId) : undefined),
+  );
+  const addPluginSurfaceStable = useStableCallback((launcher: PluginPanelLauncher) => {
+    if (!activeThreadRef) return;
+    useRightPanelStore.getState().openPlugin(activeThreadRef, launcher);
+  });
   const {
     acknowledgeActiveThreadWoke,
     activeBranchMismatchKey,
@@ -4281,6 +4295,8 @@ export default function ChatView(props: ChatViewProps) {
           onAddDevice={addDeviceSurfaceStable}
           onAddSideChat={sideChatsOffered ? openSideChatStable : undefined}
           onAddDailyNotes={addDailyNotesSurfaceStable}
+          pluginPanels={pluginLaunchers}
+          onAddPlugin={addPluginSurfaceStable}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
           diffAvailable={isServerThread && diffAvailable}

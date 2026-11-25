@@ -101,6 +101,7 @@ import {
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
   SOURCE_CONTROL_MEDIA_ASSET,
+  isPluginEnabled,
   ChatAttachmentId,
   PersistChatAttachmentsError,
   RpcClientId,
@@ -217,6 +218,7 @@ import * as DeviceService from "./device/DeviceService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
+import * as Plugins from "./plugins/Plugins.ts";
 import {
   attachmentRelativePath,
   chatAttachmentStableKey,
@@ -1563,6 +1565,7 @@ export const layerWsRpc = (
       const dailyNotes = yield* DailyNotes.DailyNotes;
       const featureFlags = yield* FeatureFlags.FeatureFlags;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
+      const pluginRegistry = yield* Plugins.PluginRegistry;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
@@ -1982,6 +1985,7 @@ export const layerWsRpc = (
           newProjectsRoot: managedFolders.namedProjectsRoot,
           ...(lastEventLoopStall === undefined ? {} : { lastEventLoopStall }),
           serverTime: DateTime.formatIso(yield* DateTime.now),
+          plugins: yield* pluginRegistry.current,
         };
       });
 
@@ -2467,6 +2471,7 @@ export const layerWsRpc = (
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
+        [WS_METHODS.scheduledTasksListRuns]: (input) => scheduledTasks.listRuns(input),
         [WS_METHODS.serverProbe]: (_input) =>
           Effect.map(DateTime.now, (now) => ({ serverTime: DateTime.formatIso(now) })),
         [WS_METHODS.serverGetConfig]: (_input) =>
@@ -3222,6 +3227,18 @@ export const layerWsRpc = (
             ) {
               return yield* issueAssetUrl({ resource: input.resource });
             }
+            if (input.resource._tag === "plugin-file") {
+              const settings = yield* serverSettings.getSettings.pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new AssetWorkspaceContextResolutionError({ resource: input.resource, cause }),
+                ),
+              );
+              if (!isPluginEnabled(settings.plugins, input.resource.pluginId)) {
+                return yield* new AssetWorkspaceContextNotFoundError({ resource: input.resource });
+              }
+              return yield* issueAssetUrl({ resource: input.resource });
+            }
             if (input.resource._tag === "draft-workspace-file") {
               return yield* issueAssetUrl({
                 resource: input.resource,
@@ -3641,6 +3658,16 @@ export const layerWsRpc = (
                       })),
                     )
                   : Stream.empty;
+              const pluginUpdates =
+                input.plugins === true
+                  ? pluginRegistry.streamChanges.pipe(
+                      Stream.map((payload) => ({
+                        version: 1 as const,
+                        type: "pluginsUpdated" as const,
+                        payload,
+                      })),
+                    )
+                  : Stream.empty;
               const settingsUpdates = settingsChanges.pipe(
                 Stream.map((settings) =>
                   ServerSettings.redactServerSettingsForClient(settings, settingsClient),
@@ -3658,7 +3685,10 @@ export const layerWsRpc = (
                   providerStatuses,
                   Stream.merge(
                     settingsUpdates,
-                    Stream.merge(environmentThemeUpdates, usageLimitSourceUpdates),
+                    Stream.merge(
+                      environmentThemeUpdates,
+                      Stream.merge(usageLimitSourceUpdates, pluginUpdates),
+                    ),
                   ),
                 ),
               );

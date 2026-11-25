@@ -290,6 +290,7 @@ import {
 } from "@t3tools/client-runtime/state/project-grouping";
 import { buildSidebarProjectPickerEntries } from "../sidebarProjectGrouping";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
+import { PluginPageIconGlyph, usePrimaryPluginPages } from "~/components/plugins/pluginPages";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 import { readIssueListPreferences } from "~/components/issue/issueListPreferences";
 import { IssueGlyph } from "~/components/issue/issuePresentation";
@@ -1338,6 +1339,8 @@ function OpenCommandPaletteDialog(props: {
     }
   };
 
+  const pluginPages = usePrimaryPluginPages();
+
   const openNewProjectFlow = () => {
     const firstOption = newProjectEnvironmentOptions[0];
     if (firstOption) startNewProject(firstOption.environmentId, null);
@@ -1793,6 +1796,23 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/notes" });
     },
   });
+
+  for (const page of pluginPages) {
+    actionItems.push({
+      kind: "action",
+      value: `action:plugin-page:${page.pluginId}:${page.pageId}`,
+      searchTerms: [page.title, page.pluginId, "plugin", "open"],
+      // Plugin titles are already in the user's language; "Open …" would not translate.
+      title: page.title,
+      icon: <PluginPageIconGlyph icon={page.icon} className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({
+          to: "/plugins/$pluginId/$pageId",
+          params: { pluginId: page.pluginId, pageId: page.pageId },
+        });
+      },
+    });
+  }
 
   for (const direction of [1, -1] as const) {
     const title =
