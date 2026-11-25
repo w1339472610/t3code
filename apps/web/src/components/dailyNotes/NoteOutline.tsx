@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   useRef,
   type ClipboardEvent as ReactClipboardEvent,
+  type FormEvent as ReactFormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -63,7 +64,14 @@ import {
 } from "./noteModel";
 import { paintMention, resolveMention, useNoteThreadIndex } from "./noteThreads";
 
-export const INDENT_PX = 22;
+export type NoteDensity = "normal" | "compact";
+
+export function indentFor(density: NoteDensity): number {
+  return density === "compact" ? 14 : 22;
+}
+
+/** Typed at the start of a line, these turn it into a to-do; IMEs give the full-width brackets. */
+const TODO_PREFIX = /^(?:\[ ?\]|【 ?】|\[[xX]\]|【[xX]】)[ \u3000]/;
 
 export interface NotesViewApi {
   /** Rows of every rendered day in document order, for moving the caret across days. */
@@ -135,6 +143,7 @@ function NoteTextImpl(props: {
   readonly date: string;
   readonly node: NoteNode;
   readonly placeholder: string | null;
+  readonly density: NoteDensity;
 }) {
   const { date, node } = props;
   const gt = useGT();
@@ -190,8 +199,21 @@ function NoteTextImpl(props: {
     clearFocusRequest(focus.nonce);
   }, [focus, node.segments]);
 
-  const edit = (update: (tree: NoteTree) => NoteTree | null, coalesceKey?: string) =>
-    editDay(date, update, { focusId: node.id, ...(coalesceKey ? { coalesceKey } : {}) });
+  const caretBefore = (adjust = 0) => ({
+    id: node.id,
+    offset: Math.max(0, (ref.current ? getSelectionOffsets(ref.current)?.start : 0) ?? 0) + adjust,
+  });
+
+  const edit = (
+    update: (tree: NoteTree) => NoteTree | null,
+    coalesceKey?: string,
+    caret = caretBefore(),
+  ) => editDay(date, update, { caret, ...(coalesceKey ? { coalesceKey } : {}) });
+
+  const restore = (direction: "undo" | "redo") => {
+    const caret = undoDay(date, direction);
+    if (caret) requestFocus(date, caret.id, caret.offset);
+  };
 
   const offsets = () => {
     const element = ref.current!;
@@ -244,15 +266,35 @@ function NoteTextImpl(props: {
     });
   };
 
-  const onInput = () => {
+  const onInput = (event: ReactFormEvent<HTMLDivElement>) => {
     const element = ref.current!;
-    const segments = readSegments(element);
+    let segments = readSegments(element);
     shown.current = segments;
+    const caret = getSelectionOffsets(element)?.start ?? 0;
+    const grown = segmentsLength(segments) - segmentsLength(node.segments);
+    const composing = (event.nativeEvent as InputEvent).isComposing;
+    const first = segments[0];
+    const prefix =
+      !composing && node.todo === null && first?.kind === "text"
+        ? TODO_PREFIX.exec(first.text)
+        : null;
+    if (prefix) {
+      const todo = /[xX]/.test(prefix[0]) ? "done" : "todo";
+      segments = deleteRange(segments, 0, prefix[0].length);
+      edit(
+        (tree) => updateNode(tree, node.id, (current) => ({ ...current, segments, todo })),
+        undefined,
+        { id: node.id, offset: Math.max(0, caret - grown) },
+      );
+      requestFocus(date, node.id, Math.max(0, caret - prefix[0].length));
+      return;
+    }
     edit(
       (tree) => updateNode(tree, node.id, (current) => ({ ...current, segments })),
       `type:${node.id}`,
+      { id: node.id, offset: Math.max(0, caret - grown) },
     );
-    syncPicker(segments, getSelectionOffsets(element)?.start ?? 0);
+    syncPicker(segments, caret);
   };
 
   const focusRow = (target: HTMLElement | undefined, place: (el: HTMLElement) => void) => {
@@ -294,14 +336,12 @@ function NoteTextImpl(props: {
 
     if (mod && !event.altKey && event.key.toLowerCase() === "z") {
       event.preventDefault();
-      const focusId = undoDay(date, event.shiftKey ? "redo" : "undo");
-      if (focusId) requestFocus(date, focusId, "end");
+      restore(event.shiftKey ? "redo" : "undo");
       return;
     }
     if (!isMac && event.ctrlKey && event.key.toLowerCase() === "y") {
       event.preventDefault();
-      const focusId = undoDay(date, "redo");
-      if (focusId) requestFocus(date, focusId, "end");
+      restore("redo");
       return;
     }
 
@@ -551,7 +591,8 @@ function NoteTextImpl(props: {
       spellCheck={false}
       data-placeholder={props.placeholder ?? undefined}
       className={cn(
-        "min-h-6 min-w-0 flex-1 cursor-text py-0.5 text-sm/5 break-words whitespace-pre-wrap outline-none",
+        "min-w-0 flex-1 cursor-text break-words whitespace-pre-wrap outline-none",
+        props.density === "compact" ? "min-h-5 py-px text-xs/[18px]" : "min-h-6 py-0.5 text-sm/5",
         node.todo === "done" && "text-muted-foreground line-through decoration-muted-foreground/60",
         props.placeholder &&
           "empty:before:pointer-events-none empty:before:text-muted-foreground/60 empty:before:content-[attr(data-placeholder)] [&:has(>br:only-child)]:before:text-muted-foreground/60 [&:has(>br:only-child)]:before:content-[attr(data-placeholder)]",
@@ -591,9 +632,11 @@ export const NoteRow = memo(function NoteRow(props: {
   readonly depth: number;
   readonly selected: boolean;
   readonly placeholder: string | null;
+  readonly density: NoteDensity;
 }) {
   const { date, node, depth } = props;
   const gt = useGT();
+  const compact = props.density === "compact";
   const view = useNotesView();
   const hasChildren = node.children.length > 0;
   return (
@@ -605,14 +648,15 @@ export const NoteRow = memo(function NoteRow(props: {
         "group/row relative flex items-start rounded-sm pr-1",
         props.selected && "bg-primary/10",
       )}
-      style={{ paddingLeft: depth * INDENT_PX }}
+      style={{ paddingLeft: depth * indentFor(props.density) }}
     >
       <button
         type="button"
         tabIndex={-1}
         aria-label={node.collapsed ? gt("Expand") : gt("Collapse")}
         className={cn(
-          "-ml-4 flex h-6 w-4 shrink-0 cursor-pointer items-center justify-center text-muted-foreground opacity-0 outline-none hover:text-foreground",
+          "-ml-4 flex w-4 shrink-0 cursor-pointer items-center justify-center text-muted-foreground opacity-0 outline-none hover:text-foreground",
+          compact ? "h-5" : "h-6",
           hasChildren && "group-hover/row:opacity-100 group-focus-within/row:opacity-100",
           !hasChildren && "pointer-events-none",
         )}
@@ -627,7 +671,10 @@ export const NoteRow = memo(function NoteRow(props: {
         tabIndex={-1}
         aria-label={gt("Drag to move, click to select")}
         data-note-bullet=""
-        className="group/bullet flex h-6 w-5 shrink-0 cursor-grab touch-none items-center justify-center"
+        className={cn(
+          "group/bullet flex shrink-0 cursor-grab touch-none items-center justify-center",
+          compact ? "h-5 w-4" : "h-6 w-5",
+        )}
         onPointerDown={(event) => view.startBulletDrag(event, date, node.id)}
       >
         <span
@@ -648,13 +695,13 @@ export const NoteRow = memo(function NoteRow(props: {
         </span>
       </span>
       {node.todo !== null ? (
-        <span className="flex h-6 shrink-0 items-center pr-1.5">
+        <span className={cn("flex shrink-0 items-center", compact ? "h-5 pr-1" : "h-6 pr-1.5")}>
           <input
             type="checkbox"
             tabIndex={-1}
             aria-label={node.todo === "done" ? gt("Mark as not done") : gt("Mark as done")}
             checked={node.todo === "done"}
-            className="size-3.5 cursor-pointer accent-primary"
+            className={cn("cursor-pointer accent-primary", compact ? "size-3" : "size-3.5")}
             onChange={() =>
               editDay(date, (tree) =>
                 updateNode(tree, node.id, (current) => ({
@@ -666,7 +713,7 @@ export const NoteRow = memo(function NoteRow(props: {
           />
         </span>
       ) : null}
-      <NoteText date={date} node={node} placeholder={props.placeholder} />
+      <NoteText date={date} node={node} placeholder={props.placeholder} density={props.density} />
     </div>
   );
 });

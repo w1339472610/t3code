@@ -8,9 +8,15 @@ export interface DailyNotesIo {
   readonly write: (date: DailyNoteDate, content: string) => Promise<DailyNote | null>;
 }
 
+/** A caret to restore with an undo step. */
+export interface NoteCaret {
+  readonly id: string;
+  readonly offset: number;
+}
+
 interface HistoryEntry {
   readonly tree: NoteTree;
-  readonly focusId: string | null;
+  readonly caret: NoteCaret | null;
 }
 
 export interface DayState {
@@ -97,8 +103,20 @@ export function setBlockSelection(selection: BlockSelection | null) {
   useDailyNotesStore.setState({ selection });
 }
 
-export async function ensureDayLoaded(date: string) {
+/** `knownEmpty`: the server snapshot lists no file for this day, so there is nothing to read. */
+export async function ensureDayLoaded(date: string, knownEmpty = false) {
   if (getDay(date) !== undefined) return;
+  if (knownEmpty) {
+    setDay(date, {
+      status: "ready",
+      tree: [],
+      syncedAt: null,
+      syncedContent: "",
+      undo: [],
+      redo: [],
+    });
+    return;
+  }
   if (io === null) {
     waitingForIo.add(date);
     return;
@@ -203,7 +221,8 @@ export function flushDailyNotes() {
 export interface EditOptions {
   /** Consecutive edits with the same key within a moment share one undo step (typing). */
   readonly coalesceKey?: string;
-  readonly focusId?: string | null;
+  /** Where the caret was before the edit; undo puts it back there. */
+  readonly caret?: NoteCaret | null;
 }
 
 export function editDay(
@@ -226,19 +245,19 @@ export function editDay(
   else lastCoalesce.delete(date);
   const undo = coalesce
     ? day.undo
-    : [...day.undo, { tree: day.tree, focusId: options.focusId ?? null }].slice(-HISTORY_LIMIT);
+    : [...day.undo, { tree: day.tree, caret: options.caret ?? null }].slice(-HISTORY_LIMIT);
   setDay(date, { ...day, tree: next, undo, redo: [] });
   scheduleSave(date);
   return true;
 }
 
-export function undoDay(date: string, direction: "undo" | "redo"): string | null {
+export function undoDay(date: string, direction: "undo" | "redo"): NoteCaret | null {
   const day = getDay(date);
   if (!day) return null;
   const from = direction === "undo" ? day.undo : day.redo;
   const entry = from.at(-1);
   if (!entry) return null;
-  const current: HistoryEntry = { tree: day.tree, focusId: entry.focusId };
+  const current: HistoryEntry = { tree: day.tree, caret: entry.caret };
   lastCoalesce.delete(date);
   setDay(date, {
     ...day,
@@ -247,7 +266,7 @@ export function undoDay(date: string, direction: "undo" | "redo"): string | null
     redo: direction === "undo" ? [...day.redo, current] : day.redo.slice(0, -1),
   });
   scheduleSave(date);
-  return entry.focusId;
+  return entry.caret;
 }
 
 export function readDayTree(date: string): NoteTree | null {

@@ -2,25 +2,22 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { T, useGT, useMessages } from "gt-react";
+import * as Schema from "effect/Schema";
+import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon, NotebookPenIcon } from "lucide-react";
 import {
-  CalendarIcon,
-  CheckSquareIcon,
-  CopyIcon,
-  MessageSquarePlusIcon,
-  NotebookPenIcon,
-  Trash2Icon,
-  Undo2Icon,
-} from "lucide-react";
-import {
+  type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 
 import { WorkspacePageHeader } from "~/components/WorkspacePageHeader";
 import { isElectron } from "~/env";
+import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { observeResize } from "~/lib/observeResize";
 import { useNowMinute } from "~/hooks/useNowMinute";
 import { useHandleNewThread } from "~/hooks/useHandleNewThread";
 import { cn } from "~/lib/utils";
@@ -49,10 +46,10 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { addPendingConversion } from "./DailyNotesBackground";
 import {
   editDay,
-  ensureDayLoaded,
   readDayTree,
   requestFocus,
   setBlockSelection,
@@ -60,13 +57,33 @@ import {
   useDailyNotesStore,
 } from "./dailyNotesStore";
 import { closeMentionPicker, useMentionPickerStore } from "./mentionPickerStore";
-import { getSelectionOffsets } from "./noteDom";
-import { INDENT_PX, NoteRow, NotesViewContext, type NotesViewApi } from "./NoteOutline";
 import {
-  cycleTodo,
+  dateFromKey,
+  inView,
+  localDateKey,
+  monthGrid,
+  type NotesViewMode,
+  sameMonth,
+  startOfWeek,
+  stepAnchor,
+  weekDays,
+} from "./noteDates";
+import {
+  cycleSelectionTodo,
+  DaySection,
+  dayLabels,
+  type DropLine,
+  OutsideMonthCell,
+  selectedNodes,
+  subtreeIds,
+} from "./NoteDay";
+import { getSelectionOffsets } from "./noteDom";
+import { NotesViewContext, type NotesViewApi } from "./NoteOutline";
+import {
   type DropTarget,
   indentNode,
   insertAtTarget,
+  insertNodes,
   insertSegments,
   locate,
   makeNode,
@@ -77,9 +94,9 @@ import {
   nodePromptText,
   nodesToMarkdown,
   outdentNode,
+  parseNote,
   removeNodes,
   segmentsKey,
-  topLevelSelection,
   updateNode,
   visibleRows,
   type VisibleRow,
@@ -92,59 +109,10 @@ import {
   resolveMention,
 } from "./noteThreads";
 
-const PAGE_SIZE = 10;
-
-function localDateKey(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-function dateFromKey(key: string): Date {
-  const [year, month, day] = key.split("-").map(Number);
-  return new Date(year!, (month ?? 1) - 1, day ?? 1);
-}
-
-function dayHeading(
-  key: string,
-  today: string,
-): { kind: "today" | "yesterday" | "date"; detail: string } {
-  const date = dateFromKey(key);
-  const detail = date.toLocaleDateString(undefined, {
-    month: "long",
-    day: "numeric",
-    weekday: "long",
-    ...(date.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }),
-  });
-  if (key === today) return { kind: "today", detail };
-  const yesterday = new Date(dateFromKey(today));
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (key === localDateKey(yesterday)) return { kind: "yesterday", detail };
-  return { kind: "date", detail };
-}
-
-function selectedNodes(tree: NoteTree, anchorId: string, headId: string): NoteNode[] {
-  const rows = visibleRows(tree);
-  const a = rows.findIndex((row) => row.node.id === anchorId);
-  const b = rows.findIndex((row) => row.node.id === headId);
-  if (a < 0 || b < 0) return [];
-  const ids = new Set(rows.slice(Math.min(a, b), Math.max(a, b) + 1).map((row) => row.node.id));
-  return topLevelSelection(tree, ids);
-}
-
-function subtreeIds(nodes: ReadonlyArray<NoteNode>, into = new Set<string>()): Set<string> {
-  for (const node of nodes) {
-    into.add(node.id);
-    subtreeIds(node.children, into);
-  }
-  return into;
-}
-
-interface DropLine {
-  readonly date: string;
-  readonly target: DropTarget;
-  readonly top: number;
-  readonly left: number;
-}
+const ViewModeSchema = Schema.Literals(["day", "week", "month"]);
+/** Narrower than these, week and month stack their days instead of laying out a grid. */
+const WEEK_GRID_MIN_WIDTH = 560;
+const MONTH_GRID_MIN_WIDTH = 860;
 
 /** Where a drop at (x, y) lands among a day's rows: between two rows, at the depth x points to. */
 function computeDrop(
@@ -154,6 +122,8 @@ function computeDrop(
   point: { x: number; y: number },
   exclude: ReadonlySet<string>,
 ): DropLine {
+  const indent = Number(dayElement.dataset.indent) || 22;
+  const bullet = Number(dayElement.dataset.bullet) || 20;
   const rowsById = new Map(visibleRows(tree).map((row) => [row.node.id, row]));
   const elements = [...dayElement.querySelectorAll<HTMLElement>("[data-note-row]")].filter(
     (element) => !exclude.has(element.dataset.nodeId ?? ""),
@@ -176,7 +146,7 @@ function computeDrop(
   const below = list[insertAt]?.row ?? null;
   const minDepth = below && above ? Math.min(below.depth, above.depth + 1) : 0;
   const maxDepth = above ? above.depth + 1 : 0;
-  const wanted = Math.round((point.x - outlineBox.left - 20) / INDENT_PX);
+  const wanted = Math.round((point.x - outlineBox.left - bullet) / indent);
   const depth = Math.max(minDepth, Math.min(maxDepth, wanted));
   const top = above
     ? list[insertAt - 1]!.element.getBoundingClientRect().bottom - outlineBox.top
@@ -196,33 +166,85 @@ function computeDrop(
       target = { parentId: anchor.parentId, afterId: anchor.node.id };
     }
   }
-  return { date, target, top, left: depth * INDENT_PX + 20 };
+  return { date, target, top, left: depth * indent + bullet };
+}
+
+function dropAt(point: { x: number; y: number }, exclude: ReadonlySet<string>): DropLine | null {
+  const dayElement = document
+    .elementFromPoint(point.x, point.y)
+    ?.closest<HTMLElement>("[data-note-day]");
+  const date = dayElement?.dataset.noteDay;
+  const tree = date ? readDayTree(date) : null;
+  return dayElement && date && tree ? computeDrop(dayElement, date, tree, point, exclude) : null;
+}
+
+/** The node every selected node sits under, or null when that is the day itself. */
+function commonParent(tree: NoteTree, nodes: ReadonlyArray<NoteNode>): string | null {
+  const chains = nodes.map((node) => {
+    const chain: string[] = [];
+    let parent = locate(tree, node.id)?.parentId ?? null;
+    while (parent !== null) {
+      chain.unshift(parent);
+      parent = locate(tree, parent)?.parentId ?? null;
+    }
+    return chain;
+  });
+  const [first = [], ...rest] = chains;
+  let shared: string | null = null;
+  for (let index = 0; index < first.length; index++) {
+    if (rest.some((chain) => chain[index] !== first[index])) break;
+    shared = first[index]!;
+  }
+  return shared;
 }
 
 interface BulletDrag {
   readonly date: string;
   readonly nodes: ReadonlyArray<NoteNode>;
+  readonly extend: boolean;
   readonly startX: number;
   readonly startY: number;
   readonly active: boolean;
   readonly x: number;
   readonly y: number;
   readonly line: DropLine | null;
-  readonly otherDay: boolean;
+}
+
+function rangeTitle(mode: NotesViewMode, anchor: string, today: string): string {
+  const thisYear = anchor.slice(0, 4) === today.slice(0, 4);
+  if (mode === "day") return "";
+  if (mode === "month") {
+    return dateFromKey(anchor).toLocaleDateString(undefined, { year: "numeric", month: "long" });
+  }
+  const days = weekDays(anchor);
+  const format = (key: string) =>
+    dateFromKey(key).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      ...(thisYear ? {} : { year: "numeric" }),
+    });
+  return `${format(days[0]!)} – ${format(days[6]!)}`;
 }
 
 export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
   const gt = useGT();
+  const messages = useMessages();
   const navigate = useNavigate();
   const nowMinute = useNowMinute();
   const today = localDateKey(new Date(`${nowMinute}:00.000Z`));
-  const [anchor, setAnchor] = useState<string | null>(null);
-  const top = anchor ?? today;
-  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [mode, setMode] = useLocalStorage<NotesViewMode, NotesViewMode>(
+    `t3code:daily-notes:view:${props.variant}`,
+    "day",
+    ViewModeSchema,
+  );
+  const [anchorState, setAnchorState] = useState<string | null>(null);
+  const anchor = anchorState ?? today;
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [convert, setConvert] = useState<{ date: string; nodeId: string } | null>(null);
   const [drag, setDrag] = useState<BulletDrag | null>(null);
   const [threadDrop, setThreadDrop] = useState<DropLine | null>(null);
+  const [rangeSelecting, setRangeSelecting] = useState(false);
+  const [width, setWidth] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const selectionHostRef = useRef<HTMLDivElement>(null);
   const threadDropRef = useRef<DropLine | null>(null);
@@ -231,6 +253,7 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
     dragRef.current = next;
     setDrag(next);
   };
+  const setAnchor = (date: string) => setAnchorState(date === today ? null : date);
 
   const environmentId = usePrimaryEnvironmentId();
   const snapshot = useEnvironmentQuery(
@@ -242,13 +265,21 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
     Date.parse(`${nowMinute}:00.000Z`),
     gt("Untitled thread"),
   );
-
   const noteDates = new Set(snapshot?.days.map((day) => day.date) ?? []);
-  const days = [
-    top,
-    ...[...noteDates].filter((date) => date < top).toSorted((a, b) => b.localeCompare(a)),
-  ];
-  const shownDays = days.slice(0, limit);
+  const knownEmpty = (date: string) => snapshot !== undefined && !noteDates.has(date);
+
+  const grid = width >= (mode === "month" ? MONTH_GRID_MIN_WIDTH : WEEK_GRID_MIN_WIDTH);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- week and month pick a grid or a stacked list from the measured width of the notes area
+  useLayoutEffect(() => {
+    const element = rootRef.current;
+    if (!element) return;
+    setWidth(element.clientWidth);
+    return observeResize(element, (entries) => {
+      const entry = entries.at(-1);
+      if (entry) setWidth(entry.contentRect.width);
+    });
+  }, []);
 
   const picker = useMentionPickerStore((state) => state.picker);
   const mentionCandidates = picker ? filterMentionCandidates(threadIndex, picker.query) : [];
@@ -291,6 +322,14 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
     });
   };
 
+  const openDay = (date: string) => {
+    setAnchor(date);
+    setMode("day");
+    rootRef.current?.scrollTo({ top: 0 });
+  };
+
+  const focusSelectionHost = () => selectionHostRef.current?.focus({ preventScroll: true });
+
   const api: NotesViewApi = {
     rowTexts: () => [...(rootRef.current?.querySelectorAll<HTMLElement>("[data-note-text]") ?? [])],
     openThread,
@@ -310,13 +349,13 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
       updateDrag({
         date,
         nodes,
+        extend: event.shiftKey,
         startX: event.clientX,
         startY: event.clientY,
         x: event.clientX,
         y: event.clientY,
         active: false,
         line: null,
-        otherDay: false,
       });
     },
     chooseMention: () => {
@@ -326,7 +365,7 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
       return true;
     },
     mentionCount: () => mentionCandidates.length,
-    focusSelectionHost: () => selectionHostRef.current?.focus({ preventScroll: true }),
+    focusSelectionHost,
   };
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the pointer outside React while a bullet is dragged
@@ -339,31 +378,13 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
         current.active ||
         Math.hypot(event.clientX - current.startX, event.clientY - current.startY) > 5;
       if (!active) return;
-      {
-        const dayElement = document
-          .elementFromPoint(event.clientX, event.clientY)
-          ?.closest<HTMLElement>("[data-note-day]");
-        const tree = readDayTree(current.date);
-        const sameDay = dayElement?.dataset.noteDay === current.date;
-        const line =
-          sameDay && dayElement && tree
-            ? computeDrop(
-                dayElement,
-                current.date,
-                tree,
-                { x: event.clientX, y: event.clientY },
-                subtreeIds(current.nodes),
-              )
-            : null;
-        updateDrag({
-          ...current,
-          active,
-          x: event.clientX,
-          y: event.clientY,
-          line,
-          otherDay: dayElement !== null && dayElement !== undefined && !sameDay,
-        });
-      }
+      updateDrag({
+        ...current,
+        active,
+        x: event.clientX,
+        y: event.clientY,
+        line: dropAt({ x: event.clientX, y: event.clientY }, subtreeIds(current.nodes)),
+      });
     };
     const up = () => {
       const current = dragRef.current;
@@ -371,13 +392,31 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
       if (!current) return;
       if (!current.active) {
         const node = current.nodes[0];
-        if (node) {
-          setBlockSelection({ date: current.date, anchorId: node.id, headId: node.id });
-          selectionHostRef.current?.focus({ preventScroll: true });
-        }
-      } else if (current.line) {
-        const line = current.line;
+        if (!node) return;
+        const selection = useDailyNotesStore.getState().selection;
+        setBlockSelection(
+          current.extend && selection?.date === current.date
+            ? { ...selection, headId: node.id }
+            : { date: current.date, anchorId: node.id, headId: node.id },
+        );
+        focusSelectionHost();
+        return;
+      }
+      const line = current.line;
+      if (!line) return;
+      if (line.date === current.date) {
         editDay(current.date, (tree) => moveNodesTo(tree, current.nodes, line.target));
+        return;
+      }
+      // Another day: add there first so a refused drop never loses the notes.
+      if (editDay(line.date, (tree) => insertAtTarget(tree, current.nodes, line.target))) {
+        editDay(current.date, (tree) =>
+          removeNodes(
+            tree,
+            current.nodes.map((node) => node.id),
+          ),
+        );
+        setBlockSelection(null);
       }
     };
     const cancel = (event: KeyboardEvent) => {
@@ -400,13 +439,7 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
     if (!root) return;
     const hover = (event: Event) => {
       const point = (event as CustomEvent<{ x: number; y: number }>).detail;
-      const dayElement = document
-        .elementFromPoint(point.x, point.y)
-        ?.closest<HTMLElement>("[data-note-day]");
-      const date = dayElement?.dataset.noteDay;
-      const tree = date ? readDayTree(date) : null;
-      threadDropRef.current =
-        dayElement && date && tree ? computeDrop(dayElement, date, tree, point, new Set()) : null;
+      threadDropRef.current = dropAt(point, new Set());
       setThreadDrop(threadDropRef.current);
     };
     const leave = () => {
@@ -447,7 +480,87 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
     };
   });
 
+  /** Dragging out of one line into others selects whole lines; Shift-click extends to a line. */
+  const onRootPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || event.pointerType === "touch") return;
+    const target = event.target as HTMLElement;
+    const text = target.closest<HTMLElement>("[data-note-text]");
+    if (!text) return;
+    const date = text.dataset.date ?? "";
+    const nodeId = text.dataset.nodeId ?? "";
+    if (event.shiftKey) {
+      const selection = useDailyNotesStore.getState().selection;
+      const active = document.activeElement as HTMLElement | null;
+      const anchorId =
+        selection?.date === date
+          ? selection.anchorId
+          : active?.dataset.noteText !== undefined && active.dataset.date === date
+            ? (active.dataset.nodeId ?? null)
+            : null;
+      if (anchorId !== null && anchorId !== nodeId) {
+        event.preventDefault();
+        setBlockSelection({ date, anchorId, headId: nodeId });
+        focusSelectionHost();
+      }
+      return;
+    }
+    let selecting = false;
+    const move = (moveEvent: PointerEvent) => {
+      const row = document
+        .elementFromPoint(moveEvent.clientX, moveEvent.clientY)
+        ?.closest<HTMLElement>("[data-note-row]");
+      const rowDate = row?.closest<HTMLElement>("[data-note-day]")?.dataset.noteDay;
+      const headId = row?.dataset.nodeId;
+      if (!selecting && (headId === undefined || headId === nodeId || rowDate !== date)) return;
+      if (!selecting) {
+        selecting = true;
+        setRangeSelecting(true);
+        focusSelectionHost();
+      }
+      window.getSelection()?.removeAllRanges();
+      if (headId !== undefined && rowDate === date) {
+        setBlockSelection({ date, anchorId: nodeId, headId });
+      }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (selecting) {
+        window.getSelection()?.removeAllRanges();
+        setRangeSelecting(false);
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   const selection = useDailyNotesStore((state) => state.selection);
+
+  const onSelectionPaste = (event: ReactClipboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    const current = useDailyNotesStore.getState().selection;
+    const tree = current ? readDayTree(current.date) : null;
+    const text = event.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n");
+    if (!current || !tree || text.trim() === "") return;
+    event.preventDefault();
+    const nodes = selectedNodes(tree, current.anchorId, current.headId);
+    const first = nodes[0] ? locate(tree, nodes[0].id) : null;
+    const pasted = parseNote(text);
+    const last = pasted.at(-1);
+    if (!first || !last) return;
+    editDay(current.date, (value) =>
+      insertNodes(
+        removeNodes(
+          value,
+          nodes.map((node) => node.id),
+        ),
+        first.parentId,
+        first.index,
+        pasted,
+      ),
+    );
+    requestFocus(current.date, last.id, "end");
+  };
 
   const onSelectionKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     // Keys typed in a row's editor bubble up here; only the focused host handles block keys.
@@ -544,6 +657,12 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
     }
     if (mod && event.key.toLowerCase() === "a") {
       handled();
+      // Each press widens to the enclosing node, then to the whole day.
+      const parent = commonParent(tree, nodes);
+      if (parent !== null) {
+        setBlockSelection({ date: current.date, anchorId: parent, headId: parent });
+        return;
+      }
       const first = rows[0];
       const last = rows.at(-1);
       if (first && last)
@@ -551,14 +670,131 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
     }
   };
 
+  const step = (delta: -1 | 1) => {
+    setAnchor(stepAnchor(anchor, mode, delta));
+    rootRef.current?.scrollTo({ top: 0 });
+  };
+
+  const dropLineFor = (date: string) =>
+    drag?.active && drag.line?.date === date
+      ? drag.line
+      : threadDrop?.date === date
+        ? threadDrop
+        : null;
+
+  const day = (date: string, layout: "focus" | "card" | "cell" | "list") => (
+    <DaySection
+      key={date}
+      date={date}
+      today={today}
+      layout={layout}
+      knownEmpty={knownEmpty(date)}
+      selection={selection?.date === date ? selection : null}
+      dropLine={dropLineFor(date)}
+      onOpenDay={openDay}
+      onConvert={(nodeId) => setConvert({ date, nodeId })}
+    />
+  );
+
+  const monthDays = monthGrid(anchor);
+  const monthListDays = monthDays.filter(
+    (date) => sameMonth(date, anchor) && (noteDates.has(date) || date === today),
+  );
+
+  const body =
+    mode === "day" ? (
+      <div
+        className={cn(
+          "mx-auto flex min-h-full w-full flex-col",
+          props.variant === "page" ? "max-w-[760px] px-10 pt-8" : "px-5 pt-3",
+        )}
+      >
+        {day(anchor, "focus")}
+      </div>
+    ) : !grid ? (
+      <div className="flex flex-col gap-6 px-5 pt-3 pb-24">
+        {(mode === "week" ? weekDays(anchor) : monthListDays).map((date) => day(date, "list"))}
+        {mode === "month" && monthListDays.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            <T>No notes this month.</T>
+          </p>
+        ) : null}
+      </div>
+    ) : mode === "week" ? (
+      <div className="grid h-full auto-rows-[minmax(220px,1fr)] grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3 p-4">
+        {weekDays(anchor).map((date) => day(date, "card"))}
+      </div>
+    ) : (
+      <div className="flex h-full min-h-[560px] flex-col p-4">
+        <div className="grid shrink-0 grid-cols-7 border-b">
+          {weekDays(startOfWeek(anchor)).map((date) => (
+            <div key={date} className="px-2 pb-1 text-xs text-muted-foreground">
+              {dayLabels(date, today, messages).weekday}
+            </div>
+          ))}
+        </div>
+        <div
+          className="grid min-h-0 flex-1 grid-cols-7 border-l"
+          style={{ gridTemplateRows: `repeat(${monthDays.length / 7}, minmax(96px, 1fr))` }}
+        >
+          {monthDays.map((date) =>
+            sameMonth(date, anchor) ? (
+              day(date, "cell")
+            ) : (
+              <OutsideMonthCell key={date} date={date} today={today} onOpenDay={openDay} />
+            ),
+          )}
+        </div>
+      </div>
+    );
+
   const controls = (
-    <div className="flex items-center gap-1">
-      {top !== today ? (
-        <Button size="xs" variant="ghost-muted" onClick={() => setAnchor(null)}>
-          <Undo2Icon />
-          <T>Back to today</T>
-        </Button>
-      ) : null}
+    <div className="flex shrink-0 items-center gap-1">
+      <ToggleGroup
+        aria-label={gt("Notes view")}
+        value={[mode]}
+        onValueChange={(value) => {
+          const next = value[0];
+          if (next === "day" || next === "week" || next === "month") setMode(next);
+        }}
+      >
+        <Toggle value="day" aria-label={gt("One day")}>
+          <T>Day</T>
+        </Toggle>
+        <Toggle value="week" aria-label={gt("The whole week")}>
+          <T>Week</T>
+        </Toggle>
+        <Toggle value="month" aria-label={gt("The whole month")}>
+          <T>Month</T>
+        </Toggle>
+      </ToggleGroup>
+      <Button
+        size="icon-xs"
+        variant="ghost-muted"
+        aria-label={gt("Earlier", { $context: "go to the previous day, week or month" })}
+        onClick={() => step(-1)}
+      >
+        <ChevronLeftIcon />
+      </Button>
+      <Button
+        size="xs"
+        variant="ghost-muted"
+        disabled={inView(today, anchor, mode)}
+        onClick={() => {
+          setAnchorState(null);
+          rootRef.current?.scrollTo({ top: 0 });
+        }}
+      >
+        <T>Today</T>
+      </Button>
+      <Button
+        size="icon-xs"
+        variant="ghost-muted"
+        aria-label={gt("Later", { $context: "go to the next day, week or month" })}
+        onClick={() => step(1)}
+      >
+        <ChevronRightIcon />
+      </Button>
       <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
         <PopoverTrigger
           render={<Button size="icon-xs" variant="ghost-muted" aria-label={gt("Choose a date")} />}
@@ -569,16 +805,15 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
           <Calendar
             mode="single"
             required
-            selected={dateFromKey(top)}
-            defaultMonth={dateFromKey(top)}
+            weekStartsOn={1}
+            selected={dateFromKey(anchor)}
+            defaultMonth={dateFromKey(anchor)}
             modifiers={{ hasNote: [...noteDates].map(dateFromKey) }}
             modifiersStyles={{
               hasNote: { fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 4 },
             }}
             onSelect={(selected) => {
-              const key = localDateKey(selected);
-              setAnchor(key === today ? null : key);
-              setLimit(PAGE_SIZE);
+              setAnchor(localDateKey(selected));
               setCalendarOpen(false);
               rootRef.current?.scrollTo({ top: 0 });
             }}
@@ -587,6 +822,8 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
       </Popover>
     </div>
   );
+
+  const title = rangeTitle(mode, anchor, today);
 
   return (
     <NoteThreadIndexContext value={threadIndex}>
@@ -598,59 +835,37 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
               className="border-b border-border [&_svg]:size-4 [&_svg]:text-muted-foreground"
             >
               <NotebookPenIcon />
-              <h1 className="min-w-0 flex-1 truncate font-medium text-sm">
+              <h1 className="shrink-0 font-medium text-sm">
                 <T>Daily notes</T>
               </h1>
+              <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{title}</span>
               {controls}
             </WorkspacePageHeader>
-          ) : null}
+          ) : (
+            <div className="flex shrink-0 items-center gap-2 px-3 pt-2 pb-1 [&_svg]:size-4">
+              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{title}</span>
+              {controls}
+            </div>
+          )}
           <div
             ref={rootRef}
             {...threadContextDropTargetProps()}
             className={cn(
               "scrollbar-gutter-both min-h-0 flex-1 overflow-y-auto overscroll-contain",
-              drag?.active && "cursor-grabbing select-none",
+              (drag?.active || rangeSelecting) && "select-none",
+              drag?.active && "cursor-grabbing",
             )}
-            onScroll={(event) => {
-              const element = event.currentTarget;
-              if (
-                element.scrollTop + element.clientHeight > element.scrollHeight - 400 &&
-                limit < days.length
-              ) {
-                setLimit((value) => value + PAGE_SIZE);
-              }
-            }}
+            onPointerDown={onRootPointerDown}
           >
             <div
               ref={selectionHostRef}
               tabIndex={-1}
               aria-label={gt("Selected notes")}
-              className={cn(
-                "mx-auto flex w-full flex-col gap-6 outline-none",
-                props.variant === "page" ? "max-w-[760px] px-10 pt-8 pb-40" : "px-5 pt-3 pb-24",
-              )}
+              className="h-full outline-none"
               onKeyDown={onSelectionKeyDown}
+              onPaste={onSelectionPaste}
             >
-              {props.variant === "page" ? null : (
-                <div className="-mb-3 flex justify-end">{controls}</div>
-              )}
-              {shownDays.map((date) => (
-                <DaySection
-                  key={date}
-                  date={date}
-                  today={today}
-                  variant={props.variant}
-                  selection={selection?.date === date ? selection : null}
-                  dropLine={
-                    drag?.active && drag.line?.date === date
-                      ? drag.line
-                      : threadDrop?.date === date
-                        ? threadDrop
-                        : null
-                  }
-                  onConvert={(nodeId) => setConvert({ date, nodeId })}
-                />
-              ))}
+              {body}
             </div>
           </div>
         </div>
@@ -659,16 +874,14 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
             className="pointer-events-none fixed z-50 max-w-64 truncate rounded-md border bg-popover px-2 py-1 text-xs shadow-md"
             style={{ left: drag.x + 12, top: drag.y + 8 }}
           >
-            {drag.otherDay
-              ? gt("Notes can''t move to another day")
-              : drag.nodes.length > 1
-                ? gt("{count, plural, one {Moving {count} note} other {Moving {count} notes}}", {
-                    count: drag.nodes.length,
-                  })
-                : nodePromptText(
-                    drag.nodes[0]!,
-                    (segment) => resolveMention(threadIndex, segment).title,
-                  ) || gt("Empty note")}
+            {drag.nodes.length > 1
+              ? gt("{count, plural, one {Moving {count} note} other {Moving {count} notes}}", {
+                  count: drag.nodes.length,
+                })
+              : nodePromptText(
+                  drag.nodes[0]!,
+                  (segment) => resolveMention(threadIndex, segment).title,
+                ) || gt("Empty note")}
           </div>
         ) : null}
         {picker ? (
@@ -710,18 +923,6 @@ function splitAt(node: NoteNode, offset: number) {
   return [before, after] as const;
 }
 
-function cycleSelectionTodo(date: string, nodes: ReadonlyArray<NoteNode>) {
-  editDay(date, (tree) => {
-    let next: NoteTree = tree;
-    for (const node of nodes)
-      next = updateNode(next, node.id, (current) => ({
-        ...current,
-        todo: cycleTodo(current.todo),
-      }));
-    return next;
-  });
-}
-
 function filterMentionCandidates(
   index: ReadonlyMap<string, NoteThreadInfo>,
   query: string,
@@ -731,160 +932,6 @@ function filterMentionCandidates(
     .filter((thread) => needle === "" || thread.title.toLowerCase().includes(needle))
     .toSorted((a, b) => b.activityAt.localeCompare(a.activityAt))
     .slice(0, 8);
-}
-
-function DaySection(props: {
-  readonly date: string;
-  readonly today: string;
-  readonly variant: "page" | "panel";
-  readonly selection: { anchorId: string; headId: string } | null;
-  readonly dropLine: DropLine | null;
-  readonly onConvert: (nodeId: string) => void;
-}) {
-  const { date } = props;
-  const day = useDailyNotesStore((state) => state.days[date]);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads the day's file from the server when it scrolls into the stream
-  useEffect(() => {
-    void ensureDayLoaded(date);
-  }, [date]);
-  const gt = useGT();
-  const heading = dayHeading(date, props.today);
-  const headingTitle =
-    heading.kind === "today"
-      ? gt("Today")
-      : heading.kind === "yesterday"
-        ? gt("Yesterday")
-        : heading.detail;
-  const tree = day?.status === "ready" ? day.tree : [];
-  const rows = visibleRows(tree);
-  const selected = props.selection
-    ? selectedNodes(tree, props.selection.anchorId, props.selection.headId)
-    : [];
-  const highlighted = subtreeIds(selected);
-  const isToday = date === props.today;
-
-  const addFirst = () => {
-    const node = makeNode();
-    if (editDay(date, (value) => (value.length === 0 ? [node] : null)))
-      requestFocus(date, node.id, 0);
-  };
-
-  return (
-    <section data-note-day={date} className="flex flex-col gap-1.5">
-      <header className="flex items-baseline gap-2">
-        <h2 className={cn("font-semibold", props.variant === "page" ? "text-lg" : "text-sm")}>
-          {headingTitle}
-        </h2>
-        {heading.kind !== "date" ? (
-          <span className="text-xs text-muted-foreground">{heading.detail}</span>
-        ) : null}
-      </header>
-      <div data-note-outline="" className="relative pl-4">
-        {day === undefined || day.status === "loading" ? (
-          <div className="h-6 text-sm text-muted-foreground/60">…</div>
-        ) : day.status === "error" ? (
-          <div className="text-sm text-muted-foreground">
-            <T>Could not load this day.</T>
-          </div>
-        ) : rows.length === 0 ? (
-          <button
-            type="button"
-            className="flex h-6 w-full cursor-text items-center pl-5 text-left text-sm text-muted-foreground/60 outline-none"
-            onClick={addFirst}
-            onFocus={addFirst}
-          >
-            {isToday ? gt("Write something…") : gt("Nothing written this day.")}
-          </button>
-        ) : (
-          rows.map((row, index) => (
-            <NoteRow
-              key={row.node.id}
-              date={date}
-              node={row.node}
-              depth={row.depth}
-              selected={highlighted.has(row.node.id)}
-              placeholder={
-                index === 0 && rows.length === 1 && isToday ? gt("Write something…") : null
-              }
-            />
-          ))
-        )}
-        {props.dropLine ? (
-          <div
-            className="pointer-events-none absolute right-0 h-0.5 rounded-full bg-primary"
-            style={{ top: props.dropLine.top - 1, left: props.dropLine.left + 16 }}
-          />
-        ) : null}
-        {selected.length > 0 ? (
-          <SelectionBar date={date} nodes={selected} onConvert={props.onConvert} />
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
-function SelectionBar(props: {
-  readonly date: string;
-  readonly nodes: ReadonlyArray<NoteNode>;
-  readonly onConvert: (nodeId: string) => void;
-}) {
-  const gt = useGT();
-  const ref = useRef<HTMLDivElement>(null);
-  const firstId = props.nodes[0]?.id;
-  const [top, setTop] = useState<number | null>(null);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- positions the bar above the first selected row, measured from the DOM
-  useEffect(() => {
-    const outline = ref.current?.parentElement;
-    const row = outline?.querySelector<HTMLElement>(`[data-note-row][data-node-id="${firstId}"]`);
-    if (!outline || !row) return;
-    setTop(row.getBoundingClientRect().top - outline.getBoundingClientRect().top);
-  }, [firstId]);
-  const keepFocus = (event: ReactPointerEvent) => event.preventDefault();
-  return (
-    <div
-      ref={ref}
-      role="toolbar"
-      aria-label={gt("Selected notes")}
-      className="absolute right-0 z-10 flex -translate-y-full items-center gap-0.5 rounded-md border bg-popover p-0.5 shadow-sm"
-      style={{ top: (top ?? 0) - 4 }}
-      onPointerDown={keepFocus}
-    >
-      <Button size="xs" variant="ghost" onClick={() => cycleSelectionTodo(props.date, props.nodes)}>
-        <CheckSquareIcon />
-        <T>To-do</T>
-      </Button>
-      {props.nodes.length === 1 ? (
-        <Button size="xs" variant="ghost" onClick={() => props.onConvert(props.nodes[0]!.id)}>
-          <MessageSquarePlusIcon />
-          <T>Start a thread</T>
-        </Button>
-      ) : null}
-      <Button
-        size="icon-xs"
-        variant="ghost"
-        aria-label={gt("Copy")}
-        onClick={() => void navigator.clipboard.writeText(nodesToMarkdown(props.nodes))}
-      >
-        <CopyIcon />
-      </Button>
-      <Button
-        size="icon-xs"
-        variant="ghost-destructive"
-        aria-label={gt("Delete")}
-        onClick={() => {
-          editDay(props.date, (tree) =>
-            removeNodes(
-              tree,
-              props.nodes.map((node) => node.id),
-            ),
-          );
-          setBlockSelection(null);
-        }}
-      >
-        <Trash2Icon />
-      </Button>
-    </div>
-  );
 }
 
 function MentionPicker(props: {
@@ -956,9 +1003,8 @@ function ConvertDialog(props: {
     if (!node || !project || prompt.trim() === "") return;
     setPending(true);
     const key = segmentsKey(node.segments);
-    const text = prompt.trim();
     const started = await handleNewThread(scopeProjectRef(project.environmentId, project.id), {
-      prompt: text,
+      prompt: prompt.trim(),
     }).catch((error: unknown) => {
       toastManager.add({
         type: "error",
@@ -974,7 +1020,7 @@ function ConvertDialog(props: {
       segmentsKey: key,
       environmentId: project.environmentId,
       threadId: started.threadId,
-      title: text.split("\n")[0]!.slice(0, 80),
+      title: prompt.trim().split("\n")[0]!.slice(0, 80),
     });
     setBlockSelection(null);
     props.onClose();
