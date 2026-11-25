@@ -5,7 +5,7 @@ import { NotebookPenIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { useSidebar } from "../ui/sidebar";
 
-/** Opens the daily notes page; sits under the search row at the top of the sidebar. */
+/** Opens the daily notes page; sits above the search row at the top of the sidebar. */
 export function SidebarDailyNotesLink(props: { readonly shortcutLabel: string | null }) {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -15,7 +15,7 @@ export function SidebarDailyNotesLink(props: { readonly shortcutLabel: string | 
       type="button"
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group/notes mt-px flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-sm font-medium text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring/70",
+        "group/notes flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-sm font-medium text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring/70",
         active && "bg-sidebar-row-hover text-sidebar-foreground",
       )}
       onClick={() => {
