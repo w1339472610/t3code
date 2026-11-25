@@ -6,7 +6,6 @@ import { use, useState } from "react";
 import { T3Wordmark } from "../T3Wordmark";
 import {
   BotIcon,
-  BrainIcon,
   CheckIcon,
   CircleAlertIcon,
   EyeIcon,
@@ -73,6 +72,14 @@ function BrowserAppIcon({ className }: { className: string }) {
       <path d="M11.2 7.2h4.3" />
       <path d="m12.4 11.4 7.5 2.6-3.4 1.6-1.5 3.6z" fill="currentColor" stroke="none" />
     </svg>
+  );
+}
+
+function ReasoningActivityIcon({ className }: { className: string }) {
+  return (
+    <span className={cn(className, "flex items-center justify-center")} aria-hidden>
+      <span className="size-1.5 rounded-full bg-current" />
+    </span>
   );
 }
 
@@ -236,7 +243,7 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
     case "bot":
       return <BotIcon className={className} aria-hidden />;
     case "brain":
-      return <BrainIcon className={className} aria-hidden />;
+      return <ReasoningActivityIcon className={className} />;
     case "browser":
     case "computer":
       return <BrowserAppIcon className={className} />;
