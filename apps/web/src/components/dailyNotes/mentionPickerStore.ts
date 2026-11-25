@@ -1,9 +1,11 @@
 import { create } from "zustand";
 
 export interface MentionPickerState {
+  /** mention: `@` lists threads; slash: `/` lists line types. */
+  readonly kind: "mention" | "slash";
   readonly date: string;
   readonly nodeId: string;
-  /** Model offset of the `@`. */
+  /** Model offset of the `@` or `/`. */
   readonly start: number;
   readonly query: string;
   readonly left: number;

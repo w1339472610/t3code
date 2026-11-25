@@ -15,6 +15,7 @@ function shape(nodes: ReadonlyArray<NoteNode>): unknown[] {
   return nodes.map((node) => ({
     text: node.segments.map((s) => (s.kind === "text" ? s.text : `@${s.threadId}`)).join(""),
     ...(node.todo ? { todo: node.todo } : {}),
+    ...(node.style === "text" ? {} : { style: node.style }),
     ...(node.collapsed ? { collapsed: true } : {}),
     ...(node.children.length > 0 ? { children: shape(node.children) } : {}),
   }));
@@ -51,10 +52,34 @@ describe("parseNote / serializeNote", () => {
   it("reads tab-indented lists, numbered items and loose paragraphs", () => {
     const tree = parseNote("# Heading\n1. one\n\t- nested\n* star\n");
     expect(shape(tree)).toEqual([
-      { text: "# Heading" },
-      { text: "one", children: [{ text: "nested" }] },
+      { text: "Heading", style: "h1" },
+      { text: "one", style: "ordered", children: [{ text: "nested" }] },
       { text: "star" },
     ]);
+  });
+
+  it("round-trips line styles, numbering each run of numbered siblings from 1", () => {
+    const markdown = [
+      "1. first",
+      "   - under the first",
+      "2. [ ] second",
+      "- ## Section",
+      "- > quoted",
+      "  > still quoted",
+      "1. again from one",
+      "- \\# not a heading",
+      "",
+    ].join("\n");
+    const tree = parseNote(markdown);
+    expect(shape(tree)).toEqual([
+      { text: "first", style: "ordered", children: [{ text: "under the first" }] },
+      { text: "second", todo: "todo", style: "ordered" },
+      { text: "Section", style: "h2" },
+      { text: "quoted\nstill quoted", style: "quote" },
+      { text: "again from one", style: "ordered" },
+      { text: "# not a heading" },
+    ]);
+    expect(serializeNote(tree)).toBe(markdown);
   });
 
   it("writes nothing for a note of empty rows", () => {

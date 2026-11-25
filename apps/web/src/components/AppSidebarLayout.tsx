@@ -350,6 +350,14 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
         return;
       }
       if (
+        isRichTextBoldShortcut(event, { isCollapsed: false }) &&
+        event.target instanceof HTMLElement &&
+        event.target.closest("[data-note-text]")
+      ) {
+        // Daily notes claim Mod+B while writing, also to bold what is typed next.
+        return;
+      }
+      if (
         !isSidebarToggleShortcut(event, keybindings, {
           context: {
             terminalFocus: isTerminalFocused(),

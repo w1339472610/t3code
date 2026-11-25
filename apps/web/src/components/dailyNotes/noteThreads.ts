@@ -122,7 +122,7 @@ export function noteThreadStatusMessage(status: NoteThreadStatus): string {
 }
 
 const MENTION_CLASS =
-  "dn-mention mx-px inline-flex max-w-full cursor-pointer items-baseline gap-1 rounded-sm align-baseline text-link select-none hover:underline data-[status=done]:text-muted-foreground data-[status=done]:line-through data-[status=missing]:text-muted-foreground data-[status=missing]:no-underline data-[selected=true]:bg-primary/15";
+  "dn-mention mx-px inline-flex max-w-full cursor-pointer items-baseline gap-1 rounded-sm align-baseline text-primary select-none hover:underline data-[status=done]:text-muted-foreground data-[status=done]:line-through data-[status=missing]:text-muted-foreground data-[status=missing]:no-underline data-[selected=true]:bg-primary/15";
 
 const STATUS_COLOR: Record<NoteThreadStatus, string> = {
   attention: "text-warning-foreground",

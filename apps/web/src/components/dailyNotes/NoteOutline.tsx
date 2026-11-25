@@ -49,6 +49,7 @@ import {
   moveAmongSiblings,
   type NoteNode,
   type NoteSegment,
+  type NoteStyle,
   type NoteTree,
   normalizeSegments,
   outdentNode,
@@ -62,13 +63,62 @@ import {
   updateNode,
   visibleRows,
 } from "./noteModel";
+import { linkRangeAt, openNoteLink, selectedRange, toggleRangeMark } from "./noteFormat";
+import {
+  applyTypingShortcut,
+  linkAt,
+  type NoteMarkName,
+  rangeHasMark,
+  setLink,
+  setMark,
+} from "./noteInline";
 import { paintMention, resolveMention, useNoteThreadIndex } from "./noteThreads";
 
 /** compact: month cells; document: the continuous document, set like body text. */
 export type NoteDensity = "normal" | "compact" | "document";
 
 const INDENT_PX: Record<NoteDensity, number> = { normal: 22, compact: 14, document: 32 };
-const ROW_HEIGHT: Record<NoteDensity, string> = { normal: "h-6", compact: "h-5", document: "h-7" };
+
+/** Text size of a line, and the height its bullet, fold arrow and checkbox line up with. */
+const LINE_LOOK: Record<NoteDensity, Record<NoteStyle, { text: string; height: string }>> = {
+  normal: {
+    text: { text: "min-h-6 text-sm/5", height: "h-6" },
+    ordered: { text: "min-h-6 text-sm/5", height: "h-6" },
+    quote: { text: "min-h-6 text-sm/5", height: "h-6" },
+    h1: { text: "min-h-9 text-xl/8 font-semibold", height: "h-9" },
+    h2: { text: "min-h-8 text-lg/7 font-semibold", height: "h-8" },
+    h3: { text: "min-h-7 text-base/6 font-semibold", height: "h-7" },
+  },
+  document: {
+    text: { text: "min-h-7 text-base/6", height: "h-7" },
+    ordered: { text: "min-h-7 text-base/6", height: "h-7" },
+    quote: { text: "min-h-7 text-base/6", height: "h-7" },
+    h1: { text: "min-h-10 text-2xl/9 font-semibold", height: "h-10" },
+    h2: { text: "min-h-9 text-xl/8 font-semibold", height: "h-9" },
+    h3: { text: "min-h-8 text-lg/7 font-semibold", height: "h-8" },
+  },
+  compact: {
+    text: { text: "min-h-5 text-xs/[18px]", height: "h-5" },
+    ordered: { text: "min-h-5 text-xs/[18px]", height: "h-5" },
+    quote: { text: "min-h-5 text-xs/[18px]", height: "h-5" },
+    h1: { text: "min-h-5 text-xs/[18px] font-semibold", height: "h-5" },
+    h2: { text: "min-h-5 text-xs/[18px] font-semibold", height: "h-5" },
+    h3: { text: "min-h-5 text-xs/[18px] font-semibold", height: "h-5" },
+  },
+};
+
+/** Typed at the start of a plain line, these change what kind of line it is. */
+const STYLE_PREFIXES: ReadonlyArray<{
+  pattern: RegExp;
+  style: (match: RegExpExecArray) => NoteStyle;
+}> = [
+  {
+    pattern: /^(#{1,3})[ \u3000]/,
+    style: (match) => (["h1", "h2", "h3"] as const)[match[1]!.length - 1]!,
+  },
+  { pattern: /^\d{1,3}[.．、][ \u3000]/, style: () => "ordered" },
+  { pattern: /^[>》][ \u3000]/, style: () => "quote" },
+];
 
 export function indentFor(density: NoteDensity): number {
   return INDENT_PX[density];
@@ -88,6 +138,11 @@ export interface NotesViewApi {
   ) => void;
   readonly chooseMention: () => boolean;
   readonly mentionCount: () => number;
+  /** Opens the link editor for a range of a note; `href` is the link it already has. */
+  readonly editLink: (
+    range: { date: string; nodeId: string; start: number; end: number },
+    href: string,
+  ) => void;
   readonly focusSelectionHost: () => void;
 }
 
@@ -191,14 +246,13 @@ function NoteTextImpl(props: {
     if (!focus || !element) return;
     element.focus({ preventScroll: true });
     const length = segmentsLength(node.segments);
-    setCaret(
-      element,
+    const start =
       focus.offset === "end"
         ? length
         : focus.offset === "start"
           ? 0
-          : Math.min(focus.offset, length),
-    );
+          : Math.min(focus.offset, length);
+    setCaret(element, start, focus.end === undefined ? start : Math.min(focus.end, length));
     element.scrollIntoView({ block: "nearest" });
     clearFocusRequest(focus.nonce);
   }, [focus, node.segments]);
@@ -229,26 +283,71 @@ function NoteTextImpl(props: {
     );
   };
 
+  /** Marks chosen with the caret collapsed; they apply to what is typed next. */
+  const pending = useRef<Partial<Record<NoteMarkName, boolean>> | null>(null);
+  const compositionStart = useRef<{ offset: number; atLinkEnd: boolean } | null>(null);
+
+  const format = (mark: NoteMarkName) => {
+    const range = selectedRange(ref.current!);
+    if (!range) return;
+    if (range.start !== range.end) {
+      toggleRangeMark(range, mark);
+      return;
+    }
+    const active =
+      pending.current?.[mark] ??
+      (range.start > 0 && rangeHasMark(node.segments, range.start - 1, range.start, mark));
+    pending.current = { ...pending.current, [mark]: !active };
+  };
+
+  /** Typing at the end of a link writes after it; links do not grow the way bold text does. */
+  const endsLink = (offset: number) => linkAt(node.segments, offset)?.end === offset;
+  const keepLinkEnd = (segments: NoteSegment[], start: number, end: number, atLinkEnd: boolean) =>
+    atLinkEnd && end > start ? setLink(segments, start, end, null) : segments;
+
+  const applyPending = (segments: NoteSegment[], start: number, end: number) => {
+    let next = segments;
+    for (const [mark, on] of Object.entries(pending.current ?? {}))
+      next = setMark(next, start, end, mark as NoteMarkName, on);
+    return next;
+  };
+
+  const setStyle = (style: NoteStyle) => {
+    edit((tree) =>
+      updateNode(tree, node.id, (current) => ({
+        ...current,
+        style: current.style === style ? "text" : style,
+      })),
+    );
+  };
+
   const syncPicker = (segments: ReadonlyArray<NoteSegment>, caret: number) => {
     const text = segments.map((s) => (s.kind === "text" ? s.text : "￼")).join("");
     const picker = useMentionPickerStore.getState().picker;
-    const start =
-      picker && picker.nodeId === node.id
-        ? picker.start
-        : (() => {
-            const before = text[caret - 1];
-            const prior = text[caret - 2];
-            return (before === "@" || before === "＠") &&
-              (prior === undefined || /[\s￼([（]/.test(prior))
-              ? caret - 1
-              : null;
-          })();
-    if (start === null) return;
+    const opened = (() => {
+      const before = text[caret - 1];
+      const prior = text[caret - 2];
+      if ((before === "@" || before === "＠") && (prior === undefined || /[\s￼([（]/.test(prior)))
+        return { start: caret - 1, kind: "mention" as const };
+      // A Chinese input method types `、` for the slash key; only a line start takes it.
+      if (
+        (before === "/" && (prior === undefined || /\s/.test(prior))) ||
+        (before === "、" && caret === 1)
+      )
+        return { start: caret - 1, kind: "slash" as const };
+      return null;
+    })();
+    const current =
+      picker && picker.nodeId === node.id ? { start: picker.start, kind: picker.kind } : opened;
+    if (current === null) return;
+    const { start, kind } = current;
     const query = text.slice(start + 1, caret);
+    const trigger = kind === "mention" ? ["@", "＠"] : ["/", "、"];
     if (
       caret <= start ||
-      (text[start] !== "@" && text[start] !== "＠") ||
+      !trigger.includes(text[start] ?? "") ||
       /[\n￼]/.test(query) ||
+      (kind === "slash" && /\s/.test(query)) ||
       query.length > 48
     ) {
       closeMentionPicker();
@@ -261,6 +360,7 @@ function NoteTextImpl(props: {
         ? selection.getRangeAt(0).getBoundingClientRect()
         : null;
     openMentionPicker({
+      kind,
       date,
       nodeId: node.id,
       start,
@@ -278,27 +378,81 @@ function NoteTextImpl(props: {
     const grown = segmentsLength(segments) - segmentsLength(node.segments);
     const composing = (event.nativeEvent as InputEvent).isComposing;
     const first = segments[0];
-    const prefix =
+    const before = { id: node.id, offset: Math.max(0, caret - grown) };
+    const todoPrefix =
       !composing && node.todo === null && first?.kind === "text"
         ? TODO_PREFIX.exec(first.text)
         : null;
-    if (prefix) {
-      const todo = /[xX]/.test(prefix[0]) ? "done" : "todo";
-      segments = deleteRange(segments, 0, prefix[0].length);
+    if (todoPrefix) {
+      const todo = /[xX]/.test(todoPrefix[0]) ? "done" : "todo";
+      segments = deleteRange(segments, 0, todoPrefix[0].length);
       edit(
         (tree) => updateNode(tree, node.id, (current) => ({ ...current, segments, todo })),
         undefined,
-        { id: node.id, offset: Math.max(0, caret - grown) },
+        before,
       );
-      requestFocus(date, node.id, Math.max(0, caret - prefix[0].length));
+      requestFocus(date, node.id, Math.max(0, caret - todoPrefix[0].length));
+      return;
+    }
+    const stylePrefix =
+      !composing && node.style === "text" && first?.kind === "text"
+        ? STYLE_PREFIXES.map((entry) => ({ entry, match: entry.pattern.exec(first.text) })).find(
+            (candidate) => candidate.match !== null,
+          )
+        : undefined;
+    if (stylePrefix?.match) {
+      const style = stylePrefix.entry.style(stylePrefix.match);
+      const length = stylePrefix.match[0].length;
+      segments = deleteRange(segments, 0, length);
+      edit(
+        (tree) => updateNode(tree, node.id, (current) => ({ ...current, segments, style })),
+        undefined,
+        before,
+      );
+      requestFocus(date, node.id, Math.max(0, caret - length));
+      return;
+    }
+    if (!composing && grown > 0) {
+      segments = keepLinkEnd(segments, caret - grown, caret, endsLink(caret - grown));
+    }
+    if (!composing && pending.current && grown > 0) {
+      segments = applyPending(segments, caret - grown, caret);
+    }
+    const shortcut = composing ? null : applyTypingShortcut(segments, caret);
+    if (shortcut) {
+      segments = shortcut.segments;
+      edit(
+        (tree) => updateNode(tree, node.id, (current) => ({ ...current, segments })),
+        undefined,
+        before,
+      );
+      requestFocus(date, node.id, shortcut.caret);
       return;
     }
     edit(
       (tree) => updateNode(tree, node.id, (current) => ({ ...current, segments })),
       `type:${node.id}`,
-      { id: node.id, offset: Math.max(0, caret - grown) },
+      before,
     );
     syncPicker(segments, caret);
+  };
+
+  const onCompositionEnd = () => {
+    const started = compositionStart.current;
+    compositionStart.current = null;
+    if (started === null) return;
+    const { offset: start, atLinkEnd } = started;
+    const element = ref.current!;
+    const caret = getSelectionOffsets(element)?.start ?? start;
+    if (caret <= start) return;
+    const typed = readSegments(element);
+    const segments = applyPending(keepLinkEnd(typed, start, caret, atLinkEnd), start, caret);
+    if (segmentsKey(segments) === segmentsKey(typed)) return;
+    edit((tree) => updateNode(tree, node.id, (current) => ({ ...current, segments })), undefined, {
+      id: node.id,
+      offset: start,
+    });
+    requestFocus(date, node.id, caret);
   };
 
   const focusRow = (target: HTMLElement | undefined, place: (el: HTMLElement) => void) => {
@@ -336,6 +490,45 @@ function NoteTextImpl(props: {
         closeMentionPicker();
         return;
       }
+    }
+
+    if (/^(Arrow|Home|End|Page)/.test(event.key)) pending.current = null;
+
+    const key = event.key.toLowerCase();
+    if (mod && !event.altKey && !event.shiftKey && (key === "b" || key === "i" || key === "e")) {
+      event.preventDefault();
+      format(key === "b" ? "bold" : key === "i" ? "italic" : "code");
+      return;
+    }
+    if (mod && event.shiftKey && !event.altKey && key === "x") {
+      event.preventDefault();
+      format("strike");
+      return;
+    }
+    if (mod && !event.shiftKey && !event.altKey && key === "k") {
+      const range = selectedRange(element);
+      if (!range) return;
+      const existing = linkRangeAt(date, node.id, range.start);
+      // With nothing selected outside a link, Mod+K stays the command palette.
+      if (range.start === range.end && !existing) return;
+      event.preventDefault();
+      const target =
+        range.start === range.end && existing
+          ? existing
+          : { ...range, href: existing && range.end <= existing.end ? existing.href : "" };
+      view.editLink(target, target.href);
+      return;
+    }
+    if (mod && event.altKey && /^Digit[0-3]$/.test(event.code)) {
+      event.preventDefault();
+      const level = Number(event.code.slice(5));
+      setStyle(level === 0 ? "text" : (["h1", "h2", "h3"] as const)[level - 1]!);
+      return;
+    }
+    if (mod && event.shiftKey && !event.altKey && event.code === "Digit7") {
+      event.preventDefault();
+      setStyle("ordered");
+      return;
     }
 
     if (mod && !event.altKey && event.key.toLowerCase() === "z") {
@@ -380,6 +573,12 @@ function NoteTextImpl(props: {
         );
         return;
       }
+      if (empty && node.style !== "text" && node.children.length === 0) {
+        edit((tree) =>
+          updateNode(tree, node.id, (current) => ({ ...current, style: "text", segments })),
+        );
+        return;
+      }
       if (empty && node.children.length === 0) {
         let handled = false;
         edit((tree) => {
@@ -400,7 +599,10 @@ function NoteTextImpl(props: {
         }
       }
       if (start === 0 && !empty) {
-        const fresh = makeNode({ todo: node.todo === null ? null : "todo" });
+        const fresh = makeNode({
+          todo: node.todo === null ? null : "todo",
+          style: node.style === "ordered" ? "ordered" : "text",
+        });
         edit((tree) => {
           const location = locate(tree, node.id);
           return location ? insertNodes(tree, location.parentId, location.index, [fresh]) : null;
@@ -409,7 +611,11 @@ function NoteTextImpl(props: {
         return;
       }
       const [left, right] = splitSegments(segments, start);
-      const fresh = makeNode({ segments: right, todo: node.todo === null ? null : "todo" });
+      const fresh = makeNode({
+        segments: right,
+        todo: node.todo === null ? null : "todo",
+        style: node.style === "ordered" || node.style === "quote" ? node.style : "text",
+      });
       const asChild = node.children.length > 0 && !node.collapsed;
       edit((tree) => {
         const updated = updateNode(tree, node.id, (current) => ({ ...current, segments: left }));
@@ -491,6 +697,10 @@ function NoteTextImpl(props: {
       const { start, end } = offsets();
       if (start !== 0 || end !== 0) return;
       event.preventDefault();
+      if (node.style !== "text") {
+        edit((tree) => updateNode(tree, node.id, (current) => ({ ...current, style: "text" })));
+        return;
+      }
       let focusTarget: { id: string; offset: number } | null = null;
       edit((tree) => {
         const previous = previousVisible(tree, node.id);
@@ -575,6 +785,12 @@ function NoteTextImpl(props: {
   };
 
   const onClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const link = (event.target as HTMLElement).closest<HTMLElement>("[data-href]");
+    if (link && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      openNoteLink(link.dataset.href ?? "");
+      return;
+    }
     const mention = (event.target as HTMLElement).closest<HTMLElement>("[data-mention]");
     if (!mention) return;
     event.preventDefault();
@@ -596,16 +812,23 @@ function NoteTextImpl(props: {
       data-placeholder={props.placeholder ?? undefined}
       className={cn(
         "min-w-0 flex-1 cursor-text break-words whitespace-pre-wrap outline-none",
-        props.density === "compact"
-          ? "min-h-5 py-px text-xs/[18px]"
-          : props.density === "document"
-            ? "min-h-7 py-0.5 text-base/6"
-            : "min-h-6 py-0.5 text-sm/5",
+        props.density === "compact" ? "py-px" : "py-0.5",
+        LINE_LOOK[props.density][node.style].text,
+        node.style === "quote" && "border-l-2 border-border pl-2.5 text-muted-foreground",
         node.todo === "done" && "text-muted-foreground line-through decoration-muted-foreground/60",
         props.placeholder &&
           "empty:before:pointer-events-none empty:before:text-muted-foreground/60 empty:before:content-[attr(data-placeholder)] [&:has(>br:only-child)]:before:text-muted-foreground/60 [&:has(>br:only-child)]:before:content-[attr(data-placeholder)]",
       )}
       onInput={onInput}
+      onCompositionStart={() => {
+        const offset = getSelectionOffsets(ref.current!)?.start;
+        compositionStart.current =
+          offset === undefined ? null : { offset, atLinkEnd: endsLink(offset) };
+      }}
+      onCompositionEnd={onCompositionEnd}
+      onPointerDown={() => {
+        pending.current = null;
+      }}
       onKeyDown={onKeyDown}
       onPaste={onPaste}
       onClick={onClick}
@@ -615,6 +838,7 @@ function NoteTextImpl(props: {
       }}
       onBlur={() => {
         setEditingDate(null);
+        pending.current = null;
         const picker = useMentionPickerStore.getState().picker;
         if (picker?.nodeId === node.id) setTimeout(closeMentionPickerIfBlurred, 150);
       }}
@@ -641,12 +865,21 @@ export const NoteRow = memo(function NoteRow(props: {
   readonly selected: boolean;
   readonly placeholder: string | null;
   readonly density: NoteDensity;
+  /** The number of a numbered line. */
+  readonly ordinal: number | null;
 }) {
   const { date, node, depth } = props;
   const gt = useGT();
   const compact = props.density === "compact";
   const isDocument = props.density === "document";
-  const rowHeight = ROW_HEIGHT[props.density];
+  const rowHeight = LINE_LOOK[props.density][node.style].height;
+  const quietBullet =
+    (node.segments.length === 0 && node.children.length === 0 && node.todo === null) ||
+    (isDocument && node.todo !== null) ||
+    node.style === "h1" ||
+    node.style === "h2" ||
+    node.style === "h3" ||
+    node.style === "quote";
   const view = useNotesView();
   const hasChildren = node.children.length > 0;
   return (
@@ -690,21 +923,32 @@ export const NoteRow = memo(function NoteRow(props: {
       >
         <span
           className={cn(
-            "flex size-4 items-center justify-center rounded-full group-hover/bullet:bg-accent",
+            "flex min-w-4 items-center justify-center rounded-full group-hover/bullet:bg-accent",
+            props.ordinal === null && "size-4",
             node.collapsed && hasChildren && "bg-muted-foreground/20",
           )}
         >
-          <span
-            className={cn(
-              "size-1.5 rounded-full bg-foreground/55",
-              // A document marks levels the way word processors do: dot, ring, square.
-              isDocument && depth % 3 === 1 && "border border-foreground/60 bg-transparent",
-              isDocument && depth % 3 === 2 && "rounded-xs",
-              ((node.segments.length === 0 && !hasChildren && node.todo === null) ||
-                (isDocument && node.todo !== null)) &&
-                "opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100",
-            )}
-          />
+          {props.ordinal !== null ? (
+            <span
+              className={cn(
+                "px-0.5 text-muted-foreground tabular-nums",
+                compact ? "text-xs" : isDocument ? "text-base" : "text-sm",
+              )}
+            >
+              {props.ordinal}.
+            </span>
+          ) : (
+            <span
+              className={cn(
+                "size-1.5 rounded-full bg-foreground/55",
+                // A document marks levels the way word processors do: dot, ring, square.
+                isDocument && depth % 3 === 1 && "border border-foreground/60 bg-transparent",
+                isDocument && depth % 3 === 2 && "rounded-xs",
+                quietBullet &&
+                  "opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100",
+              )}
+            />
+          )}
         </span>
       </span>
       {node.todo !== null ? (

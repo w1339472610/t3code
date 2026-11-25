@@ -63,6 +63,8 @@ import {
   useDailyNotesStore,
 } from "./dailyNotesStore";
 import { closeMentionPicker, useMentionPickerStore } from "./mentionPickerStore";
+import type { NoteRange } from "./noteFormat";
+import { filterSlashCommands, FormatBar, LinkEditor, type SlashCommand } from "./NoteTools";
 import {
   dateFromKey,
   inView,
@@ -306,18 +308,69 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
   }, []);
 
   const picker = useMentionPickerStore((state) => state.picker);
-  const mentionCandidates = picker ? filterMentionCandidates(threadIndex, picker.query) : [];
+  const mentionCandidates =
+    picker?.kind === "mention" ? filterMentionCandidates(threadIndex, picker.query) : [];
+  const slashCandidates =
+    picker?.kind === "slash" ? filterSlashCommands(picker.query, messages) : [];
+  const [linkEdit, setLinkEdit] = useState<{
+    range: NoteRange;
+    href: string;
+    anchor: { top: number; bottom: number; left: number };
+  } | null>(null);
+
+  const editLink = (range: NoteRange, href: string) => {
+    const selection = window.getSelection();
+    const box =
+      selection && selection.rangeCount > 0
+        ? selection.getRangeAt(0).getBoundingClientRect()
+        : null;
+    const fallback = rootRef.current
+      ?.querySelector<HTMLElement>(`[data-note-text][data-node-id="${range.nodeId}"]`)
+      ?.getBoundingClientRect();
+    const rect = box && (box.width > 0 || box.height > 0) ? box : fallback;
+    setLinkEdit({
+      range,
+      href,
+      anchor: { top: rect?.top ?? 100, bottom: rect?.bottom ?? 100, left: rect?.left ?? 100 },
+    });
+  };
+
+  /** Where the `@` or `/` query ends: the caret, or the typed query when the editor lost it. */
+  const pickerEnd = (current: NonNullable<typeof picker>) => {
+    const element = rootRef.current?.querySelector<HTMLElement>(
+      `[data-note-text][data-node-id="${current.nodeId}"]`,
+    );
+    return (
+      (element ? getSelectionOffsets(element)?.start : undefined) ??
+      current.start + 1 + current.query.length
+    );
+  };
+
+  const applySlash = (command: SlashCommand) => {
+    const current = useMentionPickerStore.getState().picker;
+    if (!current) return;
+    closeMentionPicker();
+    const end = pickerEnd(current);
+    editDay(current.date, (tree) =>
+      updateNode(tree, current.nodeId, (node) => {
+        const [before] = splitAt(node, current.start);
+        const after = splitAt(node, end)[1];
+        return {
+          ...node,
+          segments: [...before, ...after],
+          ...(command.style === undefined ? {} : { style: command.style }),
+          ...(command.todo === undefined ? {} : { todo: command.todo }),
+        };
+      }),
+    );
+    requestFocus(current.date, current.nodeId, current.start);
+  };
 
   const insertMention = (thread: NoteThreadInfo) => {
     const current = useMentionPickerStore.getState().picker;
     if (!current) return;
     closeMentionPicker();
-    const element = rootRef.current?.querySelector<HTMLElement>(
-      `[data-note-text][data-node-id="${current.nodeId}"]`,
-    );
-    const end =
-      (element ? getSelectionOffsets(element)?.start : undefined) ??
-      current.start + 1 + current.query.length;
+    const end = pickerEnd(current);
     editDay(current.date, (tree) =>
       updateNode(tree, current.nodeId, (node) => {
         const [before] = splitAt(node, current.start);
@@ -383,12 +436,21 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
       });
     },
     chooseMention: () => {
-      const choice = mentionCandidates[useMentionPickerStore.getState().picker?.highlighted ?? 0];
+      const highlighted = useMentionPickerStore.getState().picker?.highlighted ?? 0;
+      if (picker?.kind === "slash") {
+        const command = slashCandidates[highlighted];
+        if (!command) return false;
+        applySlash(command);
+        return true;
+      }
+      const choice = mentionCandidates[highlighted];
       if (!choice) return false;
       insertMention(choice);
       return true;
     },
-    mentionCount: () => mentionCandidates.length,
+    mentionCount: () =>
+      picker?.kind === "slash" ? slashCandidates.length : mentionCandidates.length,
+    editLink,
     focusSelectionHost,
   };
 
@@ -1014,13 +1076,32 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
                 ) || gt("Empty note")}
           </div>
         ) : null}
-        {picker ? (
+        {picker?.kind === "mention" ? (
           <MentionPicker
             left={picker.left}
             top={picker.top}
             highlighted={picker.highlighted}
             candidates={mentionCandidates}
             onChoose={insertMention}
+          />
+        ) : null}
+        {picker?.kind === "slash" ? (
+          <SlashMenu
+            left={picker.left}
+            top={picker.top}
+            highlighted={picker.highlighted}
+            commands={slashCandidates}
+            onChoose={applySlash}
+          />
+        ) : null}
+        {picker || linkEdit ? null : <FormatBar onEditLink={editLink} />}
+        {linkEdit ? (
+          <LinkEditor
+            key={`${linkEdit.range.nodeId}:${linkEdit.range.start}`}
+            range={linkEdit.range}
+            href={linkEdit.href}
+            anchor={linkEdit.anchor}
+            onClose={() => setLinkEdit(null)}
           />
         ) : null}
         {convert ? (
@@ -1164,6 +1245,52 @@ function MentionPicker(props: {
             <span className="shrink-0 text-xs text-muted-foreground">
               {messages(noteThreadStatusMessage(thread.status))}
             </span>
+          </button>
+        ))
+      )}
+    </div>
+  );
+}
+
+function SlashMenu(props: {
+  readonly left: number;
+  readonly top: number;
+  readonly highlighted: number;
+  readonly commands: ReadonlyArray<SlashCommand>;
+  readonly onChoose: (command: SlashCommand) => void;
+}) {
+  const gt = useGT();
+  const messages = useMessages();
+  return (
+    <div
+      role="listbox"
+      aria-label={gt("Turn into")}
+      className="fixed z-50 w-56 overflow-hidden rounded-lg border bg-popover p-1 text-sm shadow-lg"
+      style={{
+        left: Math.max(8, Math.min(props.left, window.innerWidth - 232)),
+        top: Math.min(props.top, window.innerHeight - 280),
+      }}
+      onPointerDown={(event) => event.preventDefault()}
+    >
+      {props.commands.length === 0 ? (
+        <div className="px-2 py-1.5 text-muted-foreground">
+          <T>No matching commands</T>
+        </div>
+      ) : (
+        props.commands.map((command, index) => (
+          <button
+            key={command.id}
+            type="button"
+            role="option"
+            aria-selected={index === props.highlighted}
+            className={cn(
+              "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none",
+              index === props.highlighted && "bg-accent",
+            )}
+            onClick={() => props.onChoose(command)}
+          >
+            <span className="min-w-0 flex-1 truncate">{messages(command.label)}</span>
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">{command.hint}</span>
           </button>
         ))
       )}

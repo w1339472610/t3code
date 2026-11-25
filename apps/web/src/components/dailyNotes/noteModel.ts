@@ -1,29 +1,38 @@
 /**
- * A daily note is a Markdown outline: `- text`, `- [ ] todo`, `- [x] done`, children indented two
- * spaces, extra lines of a node indented under its text, a folded node ends with `<!-- collapsed -->`,
- * and thread mentions are `[@title](t3://thread/<environmentId>/<threadId>)`.
+ * A daily note is a Markdown outline: `- text`, `- [ ] todo`, `- [x] done`, `1. numbered`,
+ * `- # heading`, `- > quote`, children indented under their parent, extra lines of a node indented
+ * under its text, and a folded node ends with `<!-- collapsed -->`. Text inside a node is in
+ * `noteInline.ts`.
  */
 
-export interface NoteTextSegment {
-  readonly kind: "text";
-  readonly text: string;
-}
+import {
+  type NoteSegment,
+  type NoteThreadSegment,
+  parseInlineSegments,
+  serializeInline,
+} from "./noteInline";
 
-export interface NoteThreadSegment {
-  readonly kind: "thread";
-  readonly environmentId: string;
-  readonly threadId: string;
-  /** The title when the mention was written; the live title wins while the thread exists. */
-  readonly title: string;
-}
+export {
+  deleteRange,
+  insertSegments,
+  normalizeSegments,
+  type NoteSegment,
+  type NoteThreadSegment,
+  parseInlineSegments,
+  segmentsKey,
+  segmentsLength,
+  splitSegments,
+} from "./noteInline";
 
-export type NoteSegment = NoteTextSegment | NoteThreadSegment;
 export type NoteTodo = "todo" | "done" | null;
+/** How a node's line reads: plain, numbered, a heading, or a quote. */
+export type NoteStyle = "text" | "ordered" | "h1" | "h2" | "h3" | "quote";
 
 export interface NoteNode {
   readonly id: string;
   readonly segments: ReadonlyArray<NoteSegment>;
   readonly todo: NoteTodo;
+  readonly style: NoteStyle;
   readonly collapsed: boolean;
   readonly children: ReadonlyArray<NoteNode>;
 }
@@ -41,116 +50,25 @@ export function makeNode(partial: Partial<Omit<NoteNode, "id">> = {}): NoteNode 
     id: newNodeId(),
     segments: partial.segments ?? [],
     todo: partial.todo ?? null,
+    style: partial.style ?? "text",
     collapsed: partial.collapsed ?? false,
     children: partial.children ?? [],
   };
 }
 
-function segmentLength(segment: NoteSegment): number {
-  return segment.kind === "text" ? segment.text.length : 1;
-}
-
-export function segmentsLength(segments: ReadonlyArray<NoteSegment>): number {
-  let total = 0;
-  for (const segment of segments) total += segmentLength(segment);
-  return total;
-}
-
-/** Merges adjacent text and drops empty text. */
-export function normalizeSegments(segments: ReadonlyArray<NoteSegment>): NoteSegment[] {
-  const out: NoteSegment[] = [];
-  for (const segment of segments) {
-    if (segment.kind === "text") {
-      if (segment.text.length === 0) continue;
-      const last = out.at(-1);
-      if (last?.kind === "text") {
-        out[out.length - 1] = { kind: "text", text: last.text + segment.text };
-        continue;
-      }
-    }
-    out.push(segment);
-  }
-  return out;
-}
-
-export function splitSegments(
-  segments: ReadonlyArray<NoteSegment>,
-  offset: number,
-): [NoteSegment[], NoteSegment[]] {
-  const left: NoteSegment[] = [];
-  const right: NoteSegment[] = [];
-  let position = 0;
-  for (const segment of segments) {
-    const length = segmentLength(segment);
-    if (position + length <= offset) left.push(segment);
-    else if (position >= offset) right.push(segment);
-    else if (segment.kind === "text") {
-      const cut = offset - position;
-      left.push({ kind: "text", text: segment.text.slice(0, cut) });
-      right.push({ kind: "text", text: segment.text.slice(cut) });
-    }
-    position += length;
-  }
-  return [normalizeSegments(left), normalizeSegments(right)];
-}
-
 function segmentsPlainText(
   segments: ReadonlyArray<NoteSegment>,
-  threadTitle: (segment: NoteThreadSegment) => string = (segment) => segment.title,
+  threadTitle: (segment: NoteThreadSegment) => string,
 ): string {
-  return segments
-    .map((segment) => (segment.kind === "text" ? segment.text : `@${threadTitle(segment)}`))
-    .join("");
+  return serializeInline(segments, (segment) => `@${threadTitle(segment)}`);
 }
 
-const THREAD_LINK = /\[@([^\]\n]*)\]\(t3:\/\/thread\/([^/\s)]+)\/([^/\s)]+)\)/g;
 const BULLET = /^([-*+]|\d{1,9}[.)])(?:[ \t]+(.*))?$/;
 const TODO = /^\[([ xX])\](?:[ \t]+|$)/;
+const HEADING = /^(#{1,3})[ \t]+/;
+const QUOTE = /^>[ \t]?/;
 const COLLAPSED = /[ \t]*<!--\s*collapsed\s*-->[ \t]*$/;
 const LOOKS_LIKE_BULLET = /^([-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
-
-function threadLink(environmentId: string, threadId: string): string {
-  return `t3://thread/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`;
-}
-
-function safeDecode(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
-export function parseInlineSegments(text: string): NoteSegment[] {
-  const segments: NoteSegment[] = [];
-  let last = 0;
-  for (const match of text.matchAll(THREAD_LINK)) {
-    const index = match.index ?? 0;
-    if (index > last) segments.push({ kind: "text", text: text.slice(last, index) });
-    segments.push({
-      kind: "thread",
-      title: match[1] ?? "",
-      environmentId: safeDecode(match[2] ?? ""),
-      threadId: safeDecode(match[3] ?? ""),
-    });
-    last = index + match[0].length;
-  }
-  if (last < text.length) segments.push({ kind: "text", text: text.slice(last) });
-  return normalizeSegments(segments);
-}
-
-function serializeInline(segments: ReadonlyArray<NoteSegment>): string {
-  return segments
-    .map((segment) =>
-      segment.kind === "text"
-        ? segment.text
-        : `[@${segment.title.replace(/[[\]\n]/g, " ").trim()}](${threadLink(
-            segment.environmentId,
-            segment.threadId,
-          )})`,
-    )
-    .join("");
-}
 
 function indentWidth(raw: string): number {
   let width = 0;
@@ -166,6 +84,7 @@ interface MutableNode {
   id: string;
   lines: string[];
   todo: NoteTodo;
+  style: NoteStyle;
   collapsed: boolean;
   children: MutableNode[];
   /** Columns before the bullet, and before the text. */
@@ -178,6 +97,7 @@ function freeze(node: MutableNode): NoteNode {
     id: node.id,
     segments: parseInlineSegments(node.lines.join("\n").replace(/\n+$/, "")),
     todo: node.todo,
+    style: node.style,
     collapsed: node.collapsed && node.children.length > 0,
     children: node.children.map(freeze),
   };
@@ -211,7 +131,7 @@ export function parseNote(markdown: string): NoteNode[] {
     if (current && indent >= current.contentIndent && !bullet) {
       const text =
         body.startsWith("\\") && LOOKS_LIKE_BULLET.test(body.slice(1)) ? body.slice(1) : body;
-      current.lines.push(text);
+      current.lines.push(current.style === "quote" ? text.replace(QUOTE, "") : text);
       continue;
     }
     if (current) trimTrailingBlank(current);
@@ -222,6 +142,15 @@ export function parseNote(markdown: string): NoteNode[] {
       todo = todoMatch[1] === " " ? "todo" : "done";
       text = text.slice(todoMatch[0].length);
     }
+    let style: NoteStyle = bullet && /^\d/.test(bullet[1] ?? "") ? "ordered" : "text";
+    const heading = HEADING.exec(text);
+    if (heading) {
+      style = heading[1]!.length === 1 ? "h1" : heading[1]!.length === 2 ? "h2" : "h3";
+      text = text.slice(heading[0].length);
+    } else if (QUOTE.test(text)) {
+      style = "quote";
+      text = text.replace(QUOTE, "");
+    }
     const collapsed = COLLAPSED.test(text);
     if (collapsed) text = text.replace(COLLAPSED, "");
     const markerWidth = bullet ? (bullet[1]?.length ?? 1) + 1 : 0;
@@ -229,6 +158,7 @@ export function parseNote(markdown: string): NoteNode[] {
       id: newNodeId(),
       lines: [text],
       todo,
+      style,
       collapsed,
       children: [],
       indent,
@@ -244,27 +174,42 @@ function trimTrailingBlank(node: MutableNode) {
   while (node.lines.length > 1 && node.lines.at(-1) === "") node.lines.pop();
 }
 
+const STYLE_PREFIX: Record<NoteStyle, string> = {
+  text: "",
+  ordered: "",
+  h1: "# ",
+  h2: "## ",
+  h3: "### ",
+  quote: "> ",
+};
+
 export function serializeNote(tree: NoteTree): string {
   const lines: string[] = [];
-  const walk = (nodes: NoteTree, depth: number) => {
+  const walk = (nodes: NoteTree, pad: string) => {
+    let ordinal = 0;
     for (const node of nodes) {
-      const pad = "  ".repeat(depth);
+      ordinal = node.style === "ordered" ? ordinal + 1 : 0;
+      const marker = node.style === "ordered" ? `${ordinal}.` : "-";
       const todo = node.todo === "todo" ? "[ ] " : node.todo === "done" ? "[x] " : "";
       const [first = "", ...rest] = serializeInline(node.segments).split("\n");
       const fold = node.collapsed && node.children.length > 0 ? " <!-- collapsed -->" : "";
-      lines.push(`${pad}- ${todo}${first}${fold}`.trimEnd());
+      // A plain line that starts like a heading or quote keeps reading as text.
+      const head = node.style === "text" && /^(#{1,3}[ \t]|>)/.test(first) ? `\\${first}` : first;
+      lines.push(`${pad}${marker} ${todo}${STYLE_PREFIX[node.style]}${head}${fold}`.trimEnd());
+      const inner = pad + " ".repeat(marker.length + 1);
       for (const line of rest) {
         if (line.trim() === "") {
-          lines.push("");
+          lines.push(node.style === "quote" ? `${inner}>` : "");
           continue;
         }
-        lines.push(`${pad}  ${LOOKS_LIKE_BULLET.test(line) ? `\\${line}` : line}`);
+        const escaped = LOOKS_LIKE_BULLET.test(line) ? `\\${line}` : line;
+        lines.push(`${inner}${node.style === "quote" ? `> ${line}` : escaped}`);
       }
-      walk(node.children, depth + 1);
+      walk(node.children, inner);
     }
   };
-  walk(tree, 0);
-  if (lines.every((line) => line.trim() === "-")) return "";
+  walk(tree, "");
+  if (lines.every((line) => /^\s*(-|\d+\.)$/.test(line))) return "";
   return `${lines.join("\n")}\n`;
 }
 
@@ -297,13 +242,17 @@ export interface VisibleRow {
   readonly node: NoteNode;
   readonly depth: number;
   readonly parentId: string | null;
+  /** The number a numbered node shows; runs of numbered siblings count from 1. */
+  readonly ordinal: number | null;
 }
 
 export function visibleRows(tree: NoteTree): VisibleRow[] {
   const rows: VisibleRow[] = [];
   const walk = (nodes: ReadonlyArray<NoteNode>, depth: number, parentId: string | null) => {
+    let ordinal = 0;
     for (const node of nodes) {
-      rows.push({ node, depth, parentId });
+      ordinal = node.style === "ordered" ? ordinal + 1 : 0;
+      rows.push({ node, depth, parentId, ordinal: node.style === "ordered" ? ordinal : null });
       if (!node.collapsed) walk(node.children, depth + 1, node.id);
     }
   };
@@ -528,28 +477,4 @@ export function insertAtTarget(
   return target.parentId === null
     ? next
     : updateNode(next, target.parentId, (node) => ({ ...node, collapsed: false }));
-}
-
-export function deleteRange(
-  segments: ReadonlyArray<NoteSegment>,
-  start: number,
-  end: number,
-): NoteSegment[] {
-  if (end <= start) return [...segments];
-  const [left] = splitSegments(segments, start);
-  const [, right] = splitSegments(segments, end);
-  return normalizeSegments([...left, ...right]);
-}
-
-export function insertSegments(
-  segments: ReadonlyArray<NoteSegment>,
-  offset: number,
-  inserted: ReadonlyArray<NoteSegment>,
-): NoteSegment[] {
-  const [left, right] = splitSegments(segments, offset);
-  return normalizeSegments([...left, ...inserted, ...right]);
-}
-
-export function segmentsKey(segments: ReadonlyArray<NoteSegment>): string {
-  return JSON.stringify(segments);
 }

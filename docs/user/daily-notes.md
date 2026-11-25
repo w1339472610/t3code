@@ -6,6 +6,8 @@ Switch between **Document**, **Day**, **Week**, and **Month** at the top. Docume
 
 - `Enter` starts a new line, `Shift+Enter` breaks the line inside a note, `Tab` and `Shift+Tab` indent and outdent. Click the empty space below a day's notes to add a line at the end.
 - `Mod+Enter` cycles a note between plain text, to-do, and done. Typing `[] ` at the start of a note also makes it a to-do, and `[x] ` makes it done.
+- Type `/` to turn a line into a heading, a numbered item, a to-do, or a quote. At the start of a line, `# `, `## `, `### `, `1. ` and `> ` do the same; `Mod+Alt+1`–`3` set a heading level and `Mod+Shift+7` a numbered item. `Backspace` at the start of a line turns it back into plain text.
+- Select text for a toolbar with bold, italic, strikethrough, inline code and link, or use `Mod+B`, `Mod+I`, `Mod+Shift+X`, `Mod+E` and `Mod+K`. With nothing selected, `Mod+B` and the others apply to what you type next. Markdown such as `**bold**`, `` `code` `` and `[text](url)` takes effect as you type it, and a web address becomes a link once you type a space after it. `Mod`-click a link to open it.
 - `Mod+↑` and `Mod+↓` fold and unfold a note's children; `Mod+Shift+↑` and `Mod+Shift+↓` move it.
 - `Esc` selects the note; so does dragging the pointer from one note into others, or `Shift`-clicking another note. Each further `Mod+A` widens the selection to the enclosing note, then to the whole day. With notes selected, `Shift+↑`/`Shift+↓` extend the selection, and you can copy, cut, paste over, delete, indent, or turn them into to-dos.
 - Drag a note's bullet to move it with its children, within its day or onto another day in Week or Month.

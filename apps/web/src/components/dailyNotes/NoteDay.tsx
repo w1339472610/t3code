@@ -185,6 +185,7 @@ export function DaySection(props: {
             node={row.node}
             depth={row.depth}
             density={density}
+            ordinal={row.ordinal}
             selected={highlighted.has(row.node.id)}
             placeholder={
               index === 0 && rows.length === 1 && layout !== "cell" ? gt("Write something…") : null

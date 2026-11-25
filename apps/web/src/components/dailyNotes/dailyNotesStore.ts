@@ -34,6 +34,8 @@ export interface FocusRequest {
   readonly date: string;
   readonly nodeId: string;
   readonly offset: number | "end" | "start";
+  /** Selects up to here instead of placing a caret. */
+  readonly end?: number;
   readonly nonce: number;
 }
 
@@ -86,10 +88,15 @@ function setDay(date: string, day: DayState) {
   useDailyNotesStore.setState((state) => ({ days: { ...state.days, [date]: day } }));
 }
 
-export function requestFocus(date: string, nodeId: string, offset: FocusRequest["offset"]) {
+export function requestFocus(
+  date: string,
+  nodeId: string,
+  offset: FocusRequest["offset"],
+  end?: number,
+) {
   focusNonce += 1;
   useDailyNotesStore.setState({
-    focus: { date, nodeId, offset, nonce: focusNonce },
+    focus: { date, nodeId, offset, ...(end === undefined ? {} : { end }), nonce: focusNonce },
     selection: null,
   });
 }
