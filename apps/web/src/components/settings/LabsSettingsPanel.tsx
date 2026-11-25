@@ -39,6 +39,7 @@ export function LabsSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection id="beta" title={gt("Beta")}>
         <BoringSidebarRow />
+        <CompactSidebarRowsRow />
         {/* Clerk is only mounted when this build has T3 Connect. */}
         {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
         <LinkedEnvironmentsRow />
@@ -100,6 +101,28 @@ function BoringSidebarMultilineRow() {
             updateSettings({ boringSidebarMultilineRows: Boolean(checked) })
           }
           aria-label={gt("Two-line folder rows")}
+        />
+      }
+    />
+  );
+}
+
+function CompactSidebarRowsRow() {
+  const searchableSetting = useSearchableSetting();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  return (
+    <SettingsRow
+      {...searchableSetting("compact-sidebar-rows")}
+      description={gt(
+        "Show active, pinned, and working threads on one line: the project icon, the title, then the status or time. A second line appears only for an environment, pull request, issue, or diff.",
+      )}
+      control={
+        <Switch
+          checked={settings.sidebarCompactRows}
+          onCheckedChange={(checked) => updateSettings({ sidebarCompactRows: Boolean(checked) })}
+          aria-label={gt("Compact thread rows")}
         />
       }
     />

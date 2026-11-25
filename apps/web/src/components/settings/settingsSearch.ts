@@ -523,6 +523,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "boring-sidebar",
     searchTerms: [msg("beta boring sidebar folder rows multiline branch pull request details")],
   },
+  {
+    id: "compact-sidebar-rows",
+    title: msg("Compact thread rows"),
+    to: "/settings/labs",
+    searchTerms: [msg("beta sidebar dense density one line single line slim thread rows height")],
+  },
 
   {
     id: "tool-call-visibility",
