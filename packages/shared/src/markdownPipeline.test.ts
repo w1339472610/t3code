@@ -952,3 +952,20 @@ it("links complete absolute paths in prose and skips shortened ones", () => {
   expect(links(`[notes](${path}) and \`${path}\``)).toEqual([path]);
   expect(links(`\`\`\`\n${path}\n\`\`\``)).toEqual([]);
 });
+
+it("links absolute paths in CJK prose and ends them at full-width punctuation", () => {
+  const video =
+    "/Volumes/work/口播视频/videos/2026-11-08_ai-video-eian/output/成片-AI视频四道审核关-v1.mp4";
+  for (const plugins of [CHAT_MARKDOWN_REMARK_PLUGINS, CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS]) {
+    const processor = unified().use(remarkParse).use(plugins);
+    const linkUrls = (node: Root | RootContent): string[] =>
+      node.type === "link" ? [node.url] : "children" in node ? node.children.flatMap(linkUrls) : [];
+    const links = (markdown: string) =>
+      linkUrls(processor.runSync(processor.parse(markdown), markdown) as Root);
+    expect(links(`成片：${video}（720×1280）`)).toEqual([video]);
+    expect(links(`输出 /Volumes/work/foo.ts，然后提交。`)).toEqual(["/Volumes/work/foo.ts"]);
+    expect(links("保存在/tmp/a.md:12。")).toEqual(["/tmp/a.md:12"]);
+    expect(links("文件：/tmp/a.md、/tmp/b.md。")).toEqual(["/tmp/a.md", "/tmp/b.md"]);
+    expect(links("见 ~/文档/tmp/a.md 和 `/tmp/notes.md`")).toEqual([]);
+  }
+});

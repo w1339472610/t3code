@@ -603,12 +603,29 @@ export function isWindowsDrivePathHref(href: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(safeDecodeURIComponent(href));
 }
 
+// CJK and full-width punctuation: `成片：/tmp/a.mp4（720p）` ends the path at `（`.
+const PATH_ENDING_SCRIPT_PUNCTUATION = /(?=[\u3000-\u303f\uff00-\uffef])[\p{P}\p{S}]/u;
+
 // Bare prose paths need a filesystem root or a position, so `/api/users.json` stays a route,
 // and a file-shaped last segment.
 export function absoluteFilePathMatches(text: string): Array<{ index: number; path: string }> {
   const paths: Array<{ index: number; path: string }> = [];
-  for (const match of text.matchAll(/(^|[\s(["'])(\/[^\s<>"'`]+)/g)) {
-    const source = match[2]!;
+  // CJK prose puts no space before a path (`保存在/tmp/a.md`), so any non-ASCII character
+  // may precede one, unless it sits inside a longer path such as `~/文档/tmp/a.md`.
+  const pattern = /(^|[\s(["']|[^\x00-\x7f])(\/[^\s<>"'`]+)/gu;
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    const boundary = match[1]!;
+    const scriptPunctuation = PATH_ENDING_SCRIPT_PUNCTUATION.exec(match[2]!);
+    const source = scriptPunctuation ? match[2]!.slice(0, scriptPunctuation.index) : match[2]!;
+    // Resume after the cut so `/tmp/a.md、/tmp/b.md` finds both paths.
+    pattern.lastIndex = match.index + boundary.length + source.length;
+    if (
+      boundary.length > 0 &&
+      boundary.charCodeAt(0) > 0x7f &&
+      !PATH_ENDING_SCRIPT_PUNCTUATION.test(boundary) &&
+      /\/[^\s]*$/.test(text.slice(0, match.index))
+    )
+      continue;
     let parentheses = 0;
     let brackets = 0;
     for (const character of source) {
