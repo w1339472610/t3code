@@ -311,6 +311,7 @@ interface MessagesTimelineProps {
   supportsConversationRollback: boolean;
   threadStartCheckpointAvailable?: boolean;
   availableRevertTurnCounts?: ReadonlySet<number> | undefined;
+  baselineTurnCountByRunId?: ReadonlyMap<RunId, number> | undefined;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   onSendAppMessage?: (text: string) => Promise<void>;
@@ -414,6 +415,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   supportsConversationRollback,
   threadStartCheckpointAvailable = false,
   availableRevertTurnCounts,
+  baselineTurnCountByRunId,
   onRevertToTurnCount,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   onSendAppMessage,
@@ -777,6 +779,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     supportsConversationRollback,
     threadStartCheckpointAvailable,
     availableRevertTurnCounts,
+    baselineTurnCountByRunId,
     worktreeSetup,
     toolCallVisibility,
     revealedMessageId,

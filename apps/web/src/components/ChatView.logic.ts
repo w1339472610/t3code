@@ -6,7 +6,10 @@ import {
   deriveLatestThreadRun,
   deriveThreadRuntime,
 } from "@t3tools/client-runtime/state/thread-execution";
-import { turnChanges } from "@t3tools/client-runtime/state/thread-repositories";
+import {
+  repositoryCheckpointScopeIds,
+  turnChanges,
+} from "@t3tools/client-runtime/state/thread-repositories";
 import { COMPACT_COMMAND_PATTERN } from "@t3tools/client-runtime/state/context-window";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import {
@@ -1712,6 +1715,36 @@ export function deriveAvailableRevertTurnCounts(projection: ThreadStructure | nu
     if (providerTurn?.providerThreadId === providerThread.id) available.add(run.ordinal);
   }
   return available;
+}
+
+const NO_BASELINE_TURN_COUNTS: ReadonlyMap<RunId, number> = new Map();
+
+/**
+ * Runs whose own checkpoint record the next run's baseline replaced, as older builds did outside
+ * Git. The baseline at a run's ordinal still pins the conversation there.
+ */
+export function deriveBaselineTurnCountByRunId(
+  projection: ThreadStructure | null,
+): ReadonlyMap<RunId, number> {
+  if (projection === null) return NO_BASELINE_TURN_COUNTS;
+  const repositoryScopeIds = repositoryCheckpointScopeIds(projection.checkpointScopes);
+  const ordinals = new Set<number>();
+  for (const checkpoint of projection.checkpoints) {
+    if (
+      checkpoint.appRunOrdinal === null &&
+      checkpoint.ordinalWithinScope > 0 &&
+      checkpoint.status !== "stale" &&
+      !repositoryScopeIds.has(checkpoint.scopeId)
+    )
+      ordinals.add(checkpoint.ordinalWithinScope);
+  }
+  if (ordinals.size === 0) return NO_BASELINE_TURN_COUNTS;
+  const turnCounts = new Map<RunId, number>();
+  for (const run of projection.runs) {
+    if (run.status !== "rolled_back" && ordinals.has(run.ordinal))
+      turnCounts.set(run.id, run.ordinal);
+  }
+  return turnCounts;
 }
 
 /** An imported native session is bound before it has messages or runs, and its cwd is fixed. */

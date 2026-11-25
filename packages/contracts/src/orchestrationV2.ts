@@ -1644,6 +1644,30 @@ export const OrchestrationV2Checkpoint = Schema.Struct({
 export type OrchestrationV2Checkpoint = typeof OrchestrationV2Checkpoint.Type;
 
 /**
+ * The run a rewind to this thread checkpoint resumes after. A baseline names no run but sits at the
+ * ordinal of the run before it. Outside Git, older builds let the next run's baseline replace that
+ * run's own record, so the baseline may be all that pins it.
+ */
+export function checkpointRollbackRunOrdinal(
+  checkpoint: Pick<OrchestrationV2Checkpoint, "appRunOrdinal" | "ordinalWithinScope">,
+): number {
+  return checkpoint.appRunOrdinal ?? checkpoint.ordinalWithinScope;
+}
+
+/** A thread checkpoint to rewind to run `turnCount`: the run's own record, else a baseline there. */
+export function findRunRollbackCheckpoint<
+  Checkpoint extends Pick<OrchestrationV2Checkpoint, "appRunOrdinal" | "ordinalWithinScope">,
+>(checkpoints: ReadonlyArray<Checkpoint>, turnCount: number): Checkpoint | undefined {
+  return (
+    checkpoints.findLast((checkpoint) => checkpoint.appRunOrdinal === turnCount) ??
+    checkpoints.findLast(
+      (checkpoint) =>
+        checkpoint.appRunOrdinal === null && checkpoint.ordinalWithinScope === turnCount,
+    )
+  );
+}
+
+/**
  * The checkpoint a file rewind to run `targetOrdinal` restores a tracked repository to, given that
  * repository scope's checkpoints. Its records are sparse: the first snapshot at or after the
  * target is the target's own, or the baseline taken before the first later run that changed the

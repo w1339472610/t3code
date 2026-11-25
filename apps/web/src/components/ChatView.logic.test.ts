@@ -16,6 +16,7 @@ import {
   snapshotComposerSend,
   withMessageContext,
   deriveAvailableRevertTurnCounts,
+  deriveBaselineTurnCountByRunId,
   deriveThreadPendingBackgroundTasks,
   resolveProactiveTurnDiffAction,
 } from "./ChatView.logic";
@@ -1532,6 +1533,38 @@ describe("deriveAvailableRevertTurnCounts", () => {
   it("offers nothing without a provider session to rewind", () => {
     expect(deriveAvailableRevertTurnCounts(projection({ providerSessionId: null })).size).toBe(0);
     expect(deriveAvailableRevertTurnCounts(null).size).toBe(0);
+  });
+});
+
+describe("deriveBaselineTurnCountByRunId", () => {
+  it("pins runs whose record a later baseline replaced, never a repository's or a stale one", () => {
+    const checkpoint = (
+      scopeId: string,
+      ordinalWithinScope: number,
+      appRunOrdinal: number | null,
+      status: string,
+    ) => ({ scopeId, ordinalWithinScope, appRunOrdinal, status });
+    const base = makeThreadProjectionFixture();
+    const projection = {
+      ...base,
+      runs: [1, 2, 3, 4, 5].map((ordinal) => ({
+        id: RunId.make(`run-${ordinal}`),
+        ordinal,
+        status: ordinal === 4 ? "rolled_back" : "completed",
+      })),
+      checkpointScopes: [{ id: "api", repositoryPath: "/work/api" }],
+      // Outside Git, each run's baseline replaced the record the run before it captured.
+      checkpoints: [
+        checkpoint("root", 0, null, "missing"),
+        checkpoint("root", 1, null, "missing"),
+        checkpoint("root", 2, null, "stale"),
+        checkpoint("api", 3, null, "ready"),
+        checkpoint("root", 4, null, "missing"),
+        checkpoint("root", 5, 5, "missing"),
+      ],
+    } as unknown as ReturnType<typeof makeThreadProjectionFixture>;
+    expect(deriveBaselineTurnCountByRunId(projection)).toEqual(new Map([[RunId.make("run-1"), 1]]));
+    expect(deriveBaselineTurnCountByRunId(null).size).toBe(0);
   });
 });
 

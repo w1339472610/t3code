@@ -336,6 +336,25 @@ describe("V2 session presentation", () => {
       });
     });
 
+    it("rewinds to runs whose record a later run's baseline replaced", () => {
+      // Outside Git, older builds let each run's baseline replace the previous run's record, so
+      // only the latest run keeps a summary of its own.
+      expect(targets([1, 2, 3], [checkpoint(3, "missing")])).toEqual({ "user-1": 0 });
+      expect(
+        Object.fromEntries(
+          deriveRevertTurnCountByUserMessageId({
+            timelineEntries: [1, 2, 3].flatMap(turn),
+            checkpoints: [checkpoint(3, "missing")],
+            threadStartCheckpointAvailable: true,
+            baselineTurnCountByRunId: new Map([
+              [runId(1), 1],
+              [runId(2), 2],
+            ]),
+          }),
+        ),
+      ).toEqual({ "user-1": 0, "user-2": 1, "user-3": 2 });
+    });
+
     it("preserves a notification-only wake run while ignoring inherited and unrelated work", () => {
       const fixture = makeStreamingTimelineFixture();
       const first = fixture.visibleTurnItems[0]!;
@@ -470,6 +489,18 @@ describe("V2 session presentation", () => {
       expect(findRevertCheckpoint(projection, 0)?.id).toBe("root-start");
       expect(findRevertCheckpoint(projection, 1)?.id).toBe("root-1");
       expect(findRevertCheckpoint(null, 0)).toBeUndefined();
+      // A baseline that replaced run 2's record stands in for it; the repository's never does.
+      const replaced = {
+        ...projection,
+        checkpoints: [
+          ...projection.checkpoints,
+          { ...entry("root-2", "root", 2, null), status: "missing" as const },
+          entry("api-3", "api", 3, null),
+        ],
+      };
+      expect(findRevertCheckpoint(replaced, 2)?.id).toBe("root-2");
+      expect(findRevertCheckpoint(replaced, 1)?.id).toBe("root-1");
+      expect(findRevertCheckpoint(replaced, 3)).toBeUndefined();
     });
 
     it("leaves inherited history uneditable and restores the first local run to thread start", () => {

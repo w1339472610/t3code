@@ -1,5 +1,6 @@
 import {
   CheckpointId,
+  checkpointRollbackRunOrdinal,
   CheckpointScopeId,
   type CommandId,
   latestProviderTurnForAttempt,
@@ -199,7 +200,7 @@ export const layer: Layer.Layer<
         });
       }
 
-      const targetOrdinal = checkpoint.appRunOrdinal ?? 0;
+      const targetOrdinal = checkpointRollbackRunOrdinal(checkpoint);
       const rollbackTarget: ProviderAdapter.ProviderAdapterV2RollbackTarget =
         targetOrdinal === 0
           ? {

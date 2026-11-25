@@ -6,6 +6,7 @@ import {
   CommandId,
   CheckpointId,
   CheckpointScopeId,
+  findRunRollbackCheckpoint,
   ORCHESTRATION_V2_WS_METHODS,
   OrchestrationV2CheckpointUnavailableError,
   WS_METHODS,
@@ -1066,13 +1067,14 @@ export const revertThreadCheckpoint = Effect.fn("EnvironmentCommands.revertThrea
       projection.checkpoints.find(
         (candidate) => candidate.id === input.checkpointId && candidate.scopeId === input.scopeId,
       ) ??
-      projection.checkpoints.findLast(
-        (candidate) =>
-          !repositoryScopeIds.has(candidate.scopeId) &&
-          (input.turnCount === 0
-            ? candidate.ordinalWithinScope === 0 && candidate.appRunOrdinal === null
-            : candidate.appRunOrdinal === input.turnCount),
-      );
+      (input.turnCount === undefined
+        ? undefined
+        : findRunRollbackCheckpoint(
+            projection.checkpoints.filter(
+              (candidate) => !repositoryScopeIds.has(candidate.scopeId),
+            ),
+            input.turnCount,
+          ));
     if (
       checkpoint === undefined ||
       // Missing or failed snapshots support conversation rewind only.

@@ -3,6 +3,7 @@ import { msg } from "gt-react";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import {
   type AssetResource,
+  findRunRollbackCheckpoint,
   type OrchestrationV2Checkpoint,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ExecutionNode,
@@ -1107,6 +1108,8 @@ export function deriveRevertTurnCountByUserMessageId(input: {
   readonly threadStartCheckpointAvailable: boolean;
   readonly availableRevertTurnCounts?: ReadonlySet<number> | undefined;
   readonly unsettledRunId?: RunId | null;
+  /** Runs whose own checkpoint record a later run's baseline replaced, by their ordinal. */
+  readonly baselineTurnCountByRunId?: ReadonlyMap<RunId, number> | undefined;
 }): Map<ChatMessage["id"], number> {
   const turnCountByRunId = new Map<RunId, number>();
   for (const checkpoint of input.checkpoints) {
@@ -1137,7 +1140,8 @@ export function deriveRevertTurnCountByUserMessageId(input: {
           ? input.threadStartCheckpointAvailable
             ? 0
             : undefined
-          : turnCountByRunId.get(previousRunId),
+          : (turnCountByRunId.get(previousRunId) ??
+              input.baselineTurnCountByRunId?.get(previousRunId)),
       );
       previousRunId = runId;
     }
@@ -1171,13 +1175,12 @@ export function findRevertCheckpoint(
   if (projection == null) return undefined;
   // A tracked repository's baseline also sits at ordinal zero; it is never a rewind target.
   const repositoryScopeIds = repositoryCheckpointScopeIds(projection.checkpointScopes);
-  return projection.checkpoints.findLast(
-    (checkpoint) =>
-      !repositoryScopeIds.has(checkpoint.scopeId) &&
-      isRewindableCheckpoint(checkpoint) &&
-      (turnCount === 0
-        ? checkpoint.ordinalWithinScope === 0 && checkpoint.appRunOrdinal === null
-        : checkpoint.appRunOrdinal === turnCount),
+  return findRunRollbackCheckpoint(
+    projection.checkpoints.filter(
+      (checkpoint) =>
+        !repositoryScopeIds.has(checkpoint.scopeId) && isRewindableCheckpoint(checkpoint),
+    ),
+    turnCount,
   );
 }
 

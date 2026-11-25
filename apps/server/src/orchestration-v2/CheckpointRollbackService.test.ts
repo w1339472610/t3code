@@ -967,6 +967,39 @@ it.layer(ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMe
       }),
     );
 
+    it.effect("rewinds only the chat to a run whose record a later baseline replaced", () =>
+      Effect.gen(function* () {
+        const history = yield* seedRollbackHistory;
+        const sql = yield* SqlClient.SqlClient;
+        // Outside Git, checkpoints keep no snapshot, and builds before baselines spared missing
+        // records let each run's baseline replace the record of the run before it.
+        yield* sql`UPDATE orchestration_v2_projection_checkpoints
+          SET status = 'missing', payload_json = json_set(payload_json, '$.status', 'missing')
+          WHERE thread_id = ${history.threadId} AND scope_id != ${history.repositoryScopeId}`;
+        yield* sql`UPDATE orchestration_v2_projection_checkpoints
+          SET run_id = NULL, app_run_ordinal = NULL,
+            payload_json = json_set(payload_json, '$.runId', json('null'), '$.appRunOrdinal', json('null'))
+          WHERE thread_id = ${history.threadId} AND scope_id != ${history.repositoryScopeId}
+            AND ordinal_within_scope < 7`;
+        const restoring = yield* history.rollback(2).pipe(Effect.flip);
+        assert.instanceOf(restoring, CheckpointRollbackService.CheckpointRollbackExecutionError);
+        assert.equal(restoring.reason, "rollback-target-invalid");
+
+        yield* history.rollback(2, false);
+
+        // Runs 3 to 6 are discarded, not the whole conversation.
+        assert.deepEqual(history.rollbackCounts, [4]);
+        assert.deepEqual(history.restored, []);
+        const runs = yield* sql<{ status: string }>`
+          SELECT status FROM orchestration_v2_projection_runs
+          WHERE thread_id = ${history.threadId} ORDER BY ordinal`;
+        assert.deepEqual(
+          runs.map((run) => run.status),
+          ["completed", "completed", ...Array.from({ length: 5 }, () => "rolled_back")],
+        );
+      }),
+    );
+
     it.effect(
       "rewinds stopped runs repeatedly without counting discarded provider turns again",
       () =>

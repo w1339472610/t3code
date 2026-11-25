@@ -65,6 +65,7 @@ import {
   type OrchestrationV2Subagent,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
+  checkpointRollbackRunOrdinal,
   latestProviderTurnForAttempt,
   repositoryRewindCheckpoint,
   parseGoalCommand,
@@ -14860,7 +14861,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             typeof scope.repositoryPath === "string" &&
             repositoryRewindCheckpoint(
               projection.checkpoints.filter((candidate) => candidate.scopeId === scope.id),
-              targetCheckpoint.appRunOrdinal ?? 0,
+              checkpointRollbackRunOrdinal(targetCheckpoint),
             ) !== null,
         );
       // Missing or failed snapshots otherwise support conversation rewind only.
@@ -14932,7 +14933,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           });
       }
 
-      const targetOrdinal = targetCheckpoint.appRunOrdinal ?? 0;
+      const targetOrdinal = checkpointRollbackRunOrdinal(targetCheckpoint);
       if (targetOrdinal > 0) {
         const targetRun = projection.runs.find((run) => run.ordinal === targetOrdinal);
         const targetProviderTurn =

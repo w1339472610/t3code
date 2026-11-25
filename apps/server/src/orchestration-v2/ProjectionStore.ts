@@ -1,5 +1,9 @@
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
-import { applyOrchestrationV2ThreadVisit, pendingGuestMessageCount } from "@t3tools/contracts";
+import {
+  applyOrchestrationV2ThreadVisit,
+  checkpointRollbackRunOrdinal,
+  pendingGuestMessageCount,
+} from "@t3tools/contracts";
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
@@ -6557,7 +6561,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             )
               return context;
 
-            const targetOrdinal = checkpoint.appRunOrdinal ?? 0;
+            const targetOrdinal = checkpointRollbackRunOrdinal(checkpoint);
             const [attemptRows, runRows, sessionRows, rolledBackAttempts, staleRows] =
               yield* Effect.all([
                 sql`SELECT attempt.attempt_id AS id, attempt.provider_turn_id AS "providerTurnId"

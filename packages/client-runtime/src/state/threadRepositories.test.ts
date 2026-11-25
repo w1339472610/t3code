@@ -343,14 +343,14 @@ describe("threadRepositorySections", () => {
 
 describe("rewindFileRestore", () => {
   const projection = { checkpointScopes: scopes, checkpoints };
-  const missingRoot = (appRunOrdinal: number | null) =>
-    ({ status: "missing", appRunOrdinal }) as const;
+  const missingRoot = (appRunOrdinal: number | null, ordinalWithinScope = appRunOrdinal ?? 0) =>
+    ({ status: "missing", appRunOrdinal, ordinalWithinScope }) as const;
   const linkedProjectFolder = { projectIsWorktree: false };
 
   it.each([
     {
       why: "a ready snapshot restores every file",
-      checkpoint: { status: "ready", appRunOrdinal: 1 } as const,
+      checkpoint: { status: "ready", appRunOrdinal: 1, ordinalWithinScope: 1 } as const,
       taskFolder: null,
       restores: "files",
     },
@@ -365,6 +365,12 @@ describe("rewindFileRestore", () => {
       checkpoint: missingRoot(null),
       taskFolder: linkedProjectFolder,
       restores: "repositories",
+    },
+    {
+      why: "a baseline that replaced run 3's record targets run 3, not the thread start",
+      checkpoint: missingRoot(null, 3),
+      taskFolder: linkedProjectFolder,
+      restores: null,
     },
     {
       why: "no repository changed after the target",
@@ -386,7 +392,7 @@ describe("rewindFileRestore", () => {
     },
     {
       why: "a stale snapshot restores nothing",
-      checkpoint: { status: "stale", appRunOrdinal: 1 } as const,
+      checkpoint: { status: "stale", appRunOrdinal: 1, ordinalWithinScope: 1 } as const,
       taskFolder: linkedProjectFolder,
       restores: null,
     },

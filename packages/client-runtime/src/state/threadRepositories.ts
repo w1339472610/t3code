@@ -1,6 +1,7 @@
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 import {
+  checkpointRollbackRunOrdinal,
   repositoryRewindCheckpoint,
   TASK_FOLDER_DEFAULT_REPOSITORIES_MAX,
   type TaskFolder,
@@ -101,14 +102,16 @@ export function repositoryCheckpointScopeIds(
  */
 export function rewindFileRestore(input: {
   readonly projection: Pick<OrchestrationV2ThreadProjection, "checkpoints" | "checkpointScopes">;
-  readonly checkpoint: Pick<OrchestrationV2Checkpoint, "status" | "appRunOrdinal"> | undefined;
+  readonly checkpoint:
+    | Pick<OrchestrationV2Checkpoint, "status" | "appRunOrdinal" | "ordinalWithinScope">
+    | undefined;
   readonly taskFolder: Pick<TaskFolder, "projectIsWorktree"> | null | undefined;
 }): "files" | "repositories" | null {
   const { checkpoint, projection } = input;
   if (checkpoint === undefined) return null;
   if (checkpoint.status === "ready") return "files";
   if (checkpoint.status !== "missing" || input.taskFolder?.projectIsWorktree !== false) return null;
-  const targetOrdinal = checkpoint.appRunOrdinal ?? 0;
+  const targetOrdinal = checkpointRollbackRunOrdinal(checkpoint);
   return projection.checkpointScopes.some(
     (scope) =>
       isRepositoryCheckpointScope(scope) &&

@@ -263,6 +263,77 @@ describe("V2 environment commands", () => {
     }).pipe(Effect.provide(layerTestRandom)),
   );
 
+  it.effect("rewinds only the chat to a run whose record a later baseline replaced", () =>
+    Effect.gen(function* () {
+      const scopeId = CheckpointScopeId.make("checkpoint-scope-root");
+      const repositoryScopeId = CheckpointScopeId.make("checkpoint-scope-repository");
+      const baselineId = CheckpointId.make("checkpoint-replaced-run-2");
+      const checkpoint = (id: string, scope: CheckpointScopeId) => ({
+        id: CheckpointId.make(id),
+        threadId: v2ThreadId,
+        scopeId: scope,
+        runId: null,
+        nodeId: NodeId.make("node-run-3"),
+        parentCheckpointId: null,
+        ordinalWithinScope: 2,
+        appRunOrdinal: null,
+        ref: CheckpointRef.make(`refs/t3/${id}`),
+        status: "missing" as const,
+        files: [],
+        capturedAt: v2Now,
+      });
+      const projection: OrchestrationV2ThreadProjection = {
+        ...v2Projection,
+        // Outside Git, run 3's baseline replaced run 2's record in builds that did not keep it.
+        checkpoints: [
+          checkpoint(baselineId, scopeId),
+          checkpoint("checkpoint-repository-2", repositoryScopeId),
+        ],
+        checkpointScopes: [
+          {
+            id: repositoryScopeId,
+            threadId: v2ThreadId,
+            runId: null,
+            nodeId: NodeId.make("node-run-1"),
+            parentScopeId: scopeId,
+            providerThreadId: null,
+            kind: "manual",
+            ordinalWithinParent: 1,
+            advancesAppRunCount: false,
+            cwd: "/workspace/api",
+            label: "api",
+            repositoryPath: "/workspace/api",
+            createdAt: v2Now,
+          },
+        ],
+      };
+      const commands: OrchestrationV2Command[] = [];
+      const supervisor = yield* makeSupervisor({ commands, projects: [], projection });
+      const revert = (commandId: string, restoreFiles?: boolean) =>
+        revertThreadCheckpoint({
+          commandId: CommandId.make(commandId),
+          threadId: v2ThreadId,
+          turnCount: 2,
+          ...(restoreFiles === undefined ? {} : { restoreFiles }),
+        }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      const refused = yield* revert("rollback-files").pipe(Effect.flip);
+      expect(refused._tag).toBe("OrchestrationV2CheckpointUnavailableError");
+      yield* revert("rollback-chat", false);
+
+      expect(commands).toEqual([
+        {
+          type: "checkpoint.rollback",
+          restoreFiles: false,
+          commandId: "rollback-chat",
+          threadId: v2ThreadId,
+          scopeId,
+          checkpointId: baselineId,
+        },
+      ]);
+    }).pipe(Effect.provide(layerTestRandom)),
+  );
+
   it.effect("preserves an existing worktree and branch during first-message launch", () =>
     Effect.gen(function* () {
       const launches: OrchestrationV2ThreadLaunchInput[] = [];
