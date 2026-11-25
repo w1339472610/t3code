@@ -28,8 +28,11 @@ import {
   visibleRows,
 } from "./noteModel";
 
-/** focus: the one day in day view; card: a week day; cell: a month day; list: narrow week or month. */
-export type DayLayout = "focus" | "card" | "cell" | "list";
+/**
+ * document: one day in the continuous document; focus: the one day in day view; card: a week
+ * day; cell: a month day; list: narrow week or month.
+ */
+export type DayLayout = "document" | "focus" | "card" | "cell" | "list";
 
 export interface DropLine {
   readonly date: string;
@@ -38,7 +41,7 @@ export interface DropLine {
   readonly left: number;
 }
 
-const BULLET_PX: Record<NoteDensity, number> = { normal: 20, compact: 16 };
+const BULLET_PX: Record<NoteDensity, number> = { normal: 20, compact: 16, document: 24 };
 
 export function selectedNodes(tree: NoteTree, anchorId: string, headId: string): NoteNode[] {
   const rows = visibleRows(tree);
@@ -127,7 +130,8 @@ export function DaySection(props: {
   useEffect(() => {
     void ensureDayLoaded(date, props.knownEmpty);
   }, [date, props.knownEmpty]);
-  const density: NoteDensity = layout === "cell" ? "compact" : "normal";
+  const density: NoteDensity =
+    layout === "cell" ? "compact" : layout === "document" ? "document" : "normal";
   const gt = useGT();
   const labels = dayLabels(date, props.today, useMessages());
   const tree = day?.status === "ready" ? day.tree : [];
@@ -162,10 +166,15 @@ export function DaySection(props: {
         layout === "cell" ? null : (
           <button
             type="button"
-            className="flex h-6 w-full cursor-text items-center pl-5 text-left text-sm text-muted-foreground/60 outline-none"
+            className={cn(
+              "flex w-full cursor-text items-center text-left text-muted-foreground/60 outline-none",
+              layout === "document" ? "h-7 pl-6 text-base" : "h-6 pl-5 text-sm",
+            )}
             onClick={addFirst}
           >
-            {isToday || layout === "focus" ? gt("Write something…") : gt("Nothing yet")}
+            {isToday || layout === "focus" || layout === "document"
+              ? gt("Write something…")
+              : gt("Nothing yet")}
           </button>
         )
       ) : (
@@ -202,6 +211,23 @@ export function DaySection(props: {
     "data-indent": indentFor(density),
     "data-bullet": BULLET_PX[density],
   };
+
+  if (layout === "document") {
+    return (
+      <section {...dataProps} className="flex scroll-mt-4 flex-col gap-2">
+        <header className="flex items-baseline gap-2.5">
+          <h2 className="font-semibold text-2xl tabular-nums tracking-tight">
+            {date.replaceAll("-", ".")}
+          </h2>
+          <span className="text-sm text-muted-foreground">{labels.weekday}</span>
+          {labels.relative ? <span className="text-sm text-primary">{labels.relative}</span> : null}
+        </header>
+        {outline}
+        <div aria-hidden className="min-h-3 cursor-text" onPointerDown={keepWriting} />
+        {bar}
+      </section>
+    );
+  }
 
   if (layout === "focus") {
     return (

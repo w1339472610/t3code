@@ -3,7 +3,13 @@ import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contract
 import { useNavigate } from "@tanstack/react-router";
 import { T, useGT, useMessages } from "gt-react";
 import * as Schema from "effect/Schema";
-import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon, NotebookPenIcon } from "lucide-react";
+import {
+  CalendarIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ListIcon,
+  NotebookPenIcon,
+} from "lucide-react";
 import {
   type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -70,6 +76,7 @@ import {
 } from "./noteDates";
 import {
   cycleSelectionTodo,
+  type DayLayout,
   DaySection,
   dayLabels,
   type DropLine,
@@ -109,7 +116,12 @@ import {
   resolveMention,
 } from "./noteThreads";
 
-const ViewModeSchema = Schema.Literals(["day", "week", "month"]);
+/** doc: every day with notes as one continuous document, newest first. */
+type NotesView = "doc" | NotesViewMode;
+const ViewModeSchema = Schema.Literals(["doc", "day", "week", "month"]);
+const DOC_PAGE_SIZE = 12;
+/** The date index beside the document needs this much width. */
+const DATE_INDEX_MIN_WIDTH = 900;
 /** Narrower than these, week and month stack their days instead of laying out a grid. */
 const WEEK_GRID_MIN_WIDTH = 560;
 const MONTH_GRID_MIN_WIDTH = 860;
@@ -210,9 +222,9 @@ interface BulletDrag {
   readonly line: DropLine | null;
 }
 
-function rangeTitle(mode: NotesViewMode, anchor: string, today: string): string {
+function rangeTitle(mode: NotesView, anchor: string, today: string): string {
   const thisYear = anchor.slice(0, 4) === today.slice(0, 4);
-  if (mode === "day") return "";
+  if (mode === "day" || mode === "doc") return "";
   if (mode === "month") {
     return dateFromKey(anchor).toLocaleDateString(undefined, { year: "numeric", month: "long" });
   }
@@ -232,11 +244,23 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
   const navigate = useNavigate();
   const nowMinute = useNowMinute();
   const today = localDateKey(new Date(`${nowMinute}:00.000Z`));
-  const [mode, setMode] = useLocalStorage<NotesViewMode, NotesViewMode>(
+  const [mode, setMode] = useLocalStorage<NotesView, NotesView>(
     `t3code:daily-notes:view:${props.variant}`,
-    "day",
+    "doc",
     ViewModeSchema,
   );
+  const [dateIndexOpen, setDateIndexOpen] = useLocalStorage(
+    "t3code:daily-notes:date-index",
+    true,
+    Schema.Boolean,
+  );
+  const [docLimit, setDocLimit] = useState(DOC_PAGE_SIZE);
+  const [activeDate, setActiveDate] = useState<string | null>(null);
+  const [jumpNonce, setJumpNonce] = useState(0);
+  const pendingJump = useRef<string | null>(null);
+  /** A day jumped to stays marked until the user scrolls, even when it cannot reach the top. */
+  const jumpedDate = useRef<string | null>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const [anchorState, setAnchorState] = useState<string | null>(null);
   const anchor = anchorState ?? today;
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -272,7 +296,7 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- week and month pick a grid or a stacked list from the measured width of the notes area
   useLayoutEffect(() => {
-    const element = rootRef.current;
+    const element = frameRef.current;
     if (!element) return;
     setWidth(element.clientWidth);
     return observeResize(element, (entries) => {
@@ -670,7 +694,63 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
     }
   };
 
+  const docDays = [
+    ...new Set([
+      today,
+      ...(anchorState === null ? [] : [anchorState]),
+      ...[...noteDates].filter((date) => date <= today),
+    ]),
+  ].toSorted((a, b) => b.localeCompare(a));
+  const shownActiveDate =
+    activeDate !== null && docDays.includes(activeDate) ? activeDate : (docDays[0] ?? today);
+  const showDateIndex =
+    mode === "doc" && props.variant === "page" && dateIndexOpen && width >= DATE_INDEX_MIN_WIDTH;
+
+  const jumpTo = (date: string) => {
+    const list = docDays.includes(date)
+      ? docDays
+      : [...docDays, date].toSorted((a, b) => b.localeCompare(a));
+    if (!docDays.includes(date)) setAnchorState(date === today ? null : date);
+    setDocLimit((limit) => Math.max(limit, list.indexOf(date) + 3));
+    pendingJump.current = date;
+    setJumpNonce((nonce) => nonce + 1);
+  };
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- scrolls the document to a date once its section has rendered
+  useLayoutEffect(() => {
+    const date = pendingJump.current;
+    if (date === null) return;
+    const section = rootRef.current?.querySelector<HTMLElement>(`[data-note-day="${date}"]`);
+    if (!section) return;
+    pendingJump.current = null;
+    jumpedDate.current = date;
+    section.scrollIntoView({ block: "start" });
+    setActiveDate(date);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a jump waits for its nonce, for more days to render, or for the document view to mount
+  }, [jumpNonce, docLimit, mode]);
+
+  const onRootScroll = () => {
+    const element = rootRef.current;
+    if (mode !== "doc" || !element) return;
+    if (
+      element.scrollTop + element.clientHeight > element.scrollHeight - 600 &&
+      docLimit < docDays.length
+    ) {
+      setDocLimit((limit) => limit + DOC_PAGE_SIZE);
+    }
+    if (jumpedDate.current !== null) return;
+    const box = element.getBoundingClientRect();
+    const line = box.top + Math.min(160, element.clientHeight / 4);
+    let current: string | null = null;
+    for (const section of element.querySelectorAll<HTMLElement>("[data-note-day]")) {
+      if (section.getBoundingClientRect().top > line) break;
+      current = section.dataset.noteDay ?? null;
+    }
+    if (current !== null && current !== activeDate) setActiveDate(current);
+  };
+
   const step = (delta: -1 | 1) => {
+    if (mode === "doc") return;
     setAnchor(stepAnchor(anchor, mode, delta));
     rootRef.current?.scrollTo({ top: 0 });
   };
@@ -682,7 +762,7 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
         ? threadDrop
         : null;
 
-  const day = (date: string, layout: "focus" | "card" | "cell" | "list") => (
+  const day = (date: string, layout: DayLayout) => (
     <DaySection
       key={date}
       date={date}
@@ -702,7 +782,16 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
   );
 
   const body =
-    mode === "day" ? (
+    mode === "doc" ? (
+      <div
+        className={cn(
+          "mx-auto flex w-full flex-col gap-8",
+          props.variant === "page" ? "max-w-[820px] px-10 pt-8 pb-40" : "px-5 pt-3 pb-24",
+        )}
+      >
+        {docDays.slice(0, docLimit).map((date) => day(date, "document"))}
+      </div>
+    ) : mode === "day" ? (
       <div
         className={cn(
           "mx-auto flex min-h-full w-full flex-col",
@@ -755,9 +844,15 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
         value={[mode]}
         onValueChange={(value) => {
           const next = value[0];
-          if (next === "day" || next === "week" || next === "month") setMode(next);
+          if (next === "doc" || next === "day" || next === "week" || next === "month") {
+            setMode(next);
+            rootRef.current?.scrollTo({ top: 0 });
+          }
         }}
       >
+        <Toggle value="doc" aria-label={gt("Every day as one document")}>
+          <T>Document</T>
+        </Toggle>
         <Toggle value="day" aria-label={gt("One day")}>
           <T>Day</T>
         </Toggle>
@@ -768,33 +863,52 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
           <T>Month</T>
         </Toggle>
       </ToggleGroup>
-      <Button
-        size="icon-xs"
-        variant="ghost-muted"
-        aria-label={gt("Earlier", { $context: "go to the previous day, week or month" })}
-        onClick={() => step(-1)}
-      >
-        <ChevronLeftIcon />
-      </Button>
+      {mode === "doc" ? null : (
+        <Button
+          size="icon-xs"
+          variant="ghost-muted"
+          aria-label={gt("Earlier", { $context: "go to the previous day, week or month" })}
+          onClick={() => step(-1)}
+        >
+          <ChevronLeftIcon />
+        </Button>
+      )}
       <Button
         size="xs"
         variant="ghost-muted"
-        disabled={inView(today, anchor, mode)}
+        disabled={mode === "doc" ? shownActiveDate === today : inView(today, anchor, mode)}
         onClick={() => {
+          if (mode === "doc") {
+            jumpTo(today);
+            return;
+          }
           setAnchorState(null);
           rootRef.current?.scrollTo({ top: 0 });
         }}
       >
         <T>Today</T>
       </Button>
-      <Button
-        size="icon-xs"
-        variant="ghost-muted"
-        aria-label={gt("Later", { $context: "go to the next day, week or month" })}
-        onClick={() => step(1)}
-      >
-        <ChevronRightIcon />
-      </Button>
+      {mode === "doc" ? null : (
+        <Button
+          size="icon-xs"
+          variant="ghost-muted"
+          aria-label={gt("Later", { $context: "go to the next day, week or month" })}
+          onClick={() => step(1)}
+        >
+          <ChevronRightIcon />
+        </Button>
+      )}
+      {mode === "doc" && props.variant === "page" && width >= DATE_INDEX_MIN_WIDTH ? (
+        <Button
+          size="icon-xs"
+          variant="ghost-muted"
+          aria-label={dateIndexOpen ? gt("Hide the date list") : gt("Show the date list")}
+          aria-pressed={dateIndexOpen}
+          onClick={() => setDateIndexOpen(!dateIndexOpen)}
+        >
+          <ListIcon />
+        </Button>
+      ) : null}
       <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
         <PopoverTrigger
           render={<Button size="icon-xs" variant="ghost-muted" aria-label={gt("Choose a date")} />}
@@ -806,15 +920,19 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
             mode="single"
             required
             weekStartsOn={1}
-            selected={dateFromKey(anchor)}
-            defaultMonth={dateFromKey(anchor)}
+            selected={dateFromKey(mode === "doc" ? shownActiveDate : anchor)}
+            defaultMonth={dateFromKey(mode === "doc" ? shownActiveDate : anchor)}
             modifiers={{ hasNote: [...noteDates].map(dateFromKey) }}
             modifiersStyles={{
               hasNote: { fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 4 },
             }}
             onSelect={(selected) => {
-              setAnchor(localDateKey(selected));
               setCalendarOpen(false);
+              if (mode === "doc") {
+                jumpTo(localDateKey(selected));
+                return;
+              }
+              setAnchor(localDateKey(selected));
               rootRef.current?.scrollTo({ top: 0 });
             }}
           />
@@ -847,25 +965,37 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
               {controls}
             </div>
           )}
-          <div
-            ref={rootRef}
-            {...threadContextDropTargetProps()}
-            className={cn(
-              "scrollbar-gutter-both min-h-0 flex-1 overflow-y-auto overscroll-contain",
-              (drag?.active || rangeSelecting) && "select-none",
-              drag?.active && "cursor-grabbing",
-            )}
-            onPointerDown={onRootPointerDown}
-          >
+          <div ref={frameRef} className="flex min-h-0 flex-1">
+            {showDateIndex ? (
+              <DateIndex days={docDays} active={shownActiveDate} today={today} onJump={jumpTo} />
+            ) : null}
             <div
-              ref={selectionHostRef}
-              tabIndex={-1}
-              aria-label={gt("Selected notes")}
-              className="h-full outline-none"
-              onKeyDown={onSelectionKeyDown}
-              onPaste={onSelectionPaste}
+              ref={rootRef}
+              {...threadContextDropTargetProps()}
+              className={cn(
+                "scrollbar-gutter-both min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain",
+                (drag?.active || rangeSelecting) && "select-none",
+                drag?.active && "cursor-grabbing",
+              )}
+              onPointerDown={onRootPointerDown}
+              onScroll={onRootScroll}
+              onWheel={() => {
+                jumpedDate.current = null;
+              }}
+              onTouchMove={() => {
+                jumpedDate.current = null;
+              }}
             >
-              {body}
+              <div
+                ref={selectionHostRef}
+                tabIndex={-1}
+                aria-label={gt("Selected notes")}
+                className="h-full outline-none"
+                onKeyDown={onSelectionKeyDown}
+                onPaste={onSelectionPaste}
+              >
+                {body}
+              </div>
             </div>
           </div>
         </div>
@@ -903,6 +1033,67 @@ export function DailyNotesView(props: { readonly variant: "page" | "panel" }) {
         ) : null}
       </NotesViewContext>
     </NoteThreadIndexContext>
+  );
+}
+
+/** Every date in the document, grouped by month; the one at the top of the view is marked. */
+function DateIndex(props: {
+  readonly days: ReadonlyArray<string>;
+  readonly active: string;
+  readonly today: string;
+  readonly onJump: (date: string) => void;
+}) {
+  const gt = useGT();
+  const messages = useMessages();
+  const listRef = useRef<HTMLElement>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keeps the marked date visible in the index as the document scrolls
+  useEffect(() => {
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-index-date="${props.active}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [props.active]);
+  const months = new Map<string, string[]>();
+  for (const date of props.days) {
+    const month = date.slice(0, 7);
+    months.set(month, [...(months.get(month) ?? []), date]);
+  }
+  return (
+    <nav
+      ref={listRef}
+      aria-label={gt("Dates")}
+      className="flex w-48 shrink-0 flex-col gap-4 overflow-y-auto overscroll-contain border-r border-border/70 px-3 pt-6 pb-10"
+    >
+      {[...months].map(([month, dates]) => (
+        <div key={month} className="flex flex-col">
+          <div className="px-2 pb-1 text-xs text-muted-foreground">
+            {dateFromKey(`${month}-01`).toLocaleDateString(undefined, {
+              year: "numeric",
+              month: "long",
+            })}
+          </div>
+          {dates.map((date) => (
+            <button
+              key={date}
+              type="button"
+              data-index-date={date}
+              aria-current={date === props.active ? "location" : undefined}
+              className={cn(
+                "flex cursor-pointer items-baseline gap-2 rounded-md px-2 py-1 text-left text-sm tabular-nums text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                date === props.active && "bg-accent/70 font-medium text-foreground",
+              )}
+              onClick={() => props.onJump(date)}
+            >
+              <span>{date.slice(5).replace("-", ".")}</span>
+              <span className="text-xs text-muted-foreground/80">
+                {date === props.today
+                  ? gt("Today")
+                  : dayLabels(date, props.today, messages).weekday}
+              </span>
+            </button>
+          ))}
+        </div>
+      ))}
+    </nav>
   );
 }
 

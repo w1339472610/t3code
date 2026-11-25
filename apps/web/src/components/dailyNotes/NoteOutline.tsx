@@ -64,10 +64,14 @@ import {
 } from "./noteModel";
 import { paintMention, resolveMention, useNoteThreadIndex } from "./noteThreads";
 
-export type NoteDensity = "normal" | "compact";
+/** compact: month cells; document: the continuous document, set like body text. */
+export type NoteDensity = "normal" | "compact" | "document";
+
+const INDENT_PX: Record<NoteDensity, number> = { normal: 22, compact: 14, document: 32 };
+const ROW_HEIGHT: Record<NoteDensity, string> = { normal: "h-6", compact: "h-5", document: "h-7" };
 
 export function indentFor(density: NoteDensity): number {
-  return density === "compact" ? 14 : 22;
+  return INDENT_PX[density];
 }
 
 /** Typed at the start of a line, these turn it into a to-do; IMEs give the full-width brackets. */
@@ -592,7 +596,11 @@ function NoteTextImpl(props: {
       data-placeholder={props.placeholder ?? undefined}
       className={cn(
         "min-w-0 flex-1 cursor-text break-words whitespace-pre-wrap outline-none",
-        props.density === "compact" ? "min-h-5 py-px text-xs/[18px]" : "min-h-6 py-0.5 text-sm/5",
+        props.density === "compact"
+          ? "min-h-5 py-px text-xs/[18px]"
+          : props.density === "document"
+            ? "min-h-7 py-0.5 text-base/6"
+            : "min-h-6 py-0.5 text-sm/5",
         node.todo === "done" && "text-muted-foreground line-through decoration-muted-foreground/60",
         props.placeholder &&
           "empty:before:pointer-events-none empty:before:text-muted-foreground/60 empty:before:content-[attr(data-placeholder)] [&:has(>br:only-child)]:before:text-muted-foreground/60 [&:has(>br:only-child)]:before:content-[attr(data-placeholder)]",
@@ -637,6 +645,8 @@ export const NoteRow = memo(function NoteRow(props: {
   const { date, node, depth } = props;
   const gt = useGT();
   const compact = props.density === "compact";
+  const isDocument = props.density === "document";
+  const rowHeight = ROW_HEIGHT[props.density];
   const view = useNotesView();
   const hasChildren = node.children.length > 0;
   return (
@@ -656,7 +666,7 @@ export const NoteRow = memo(function NoteRow(props: {
         aria-label={node.collapsed ? gt("Expand") : gt("Collapse")}
         className={cn(
           "-ml-4 flex w-4 shrink-0 cursor-pointer items-center justify-center text-muted-foreground opacity-0 outline-none hover:text-foreground",
-          compact ? "h-5" : "h-6",
+          rowHeight,
           hasChildren && "group-hover/row:opacity-100 group-focus-within/row:opacity-100",
           !hasChildren && "pointer-events-none",
         )}
@@ -673,7 +683,8 @@ export const NoteRow = memo(function NoteRow(props: {
         data-note-bullet=""
         className={cn(
           "group/bullet flex shrink-0 cursor-grab touch-none items-center justify-center",
-          compact ? "h-5 w-4" : "h-6 w-5",
+          rowHeight,
+          compact ? "w-4" : isDocument ? "w-6" : "w-5",
         )}
         onPointerDown={(event) => view.startBulletDrag(event, date, node.id)}
       >
@@ -686,22 +697,33 @@ export const NoteRow = memo(function NoteRow(props: {
           <span
             className={cn(
               "size-1.5 rounded-full bg-foreground/55",
-              node.segments.length === 0 &&
-                !hasChildren &&
-                node.todo === null &&
+              // A document marks levels the way word processors do: dot, ring, square.
+              isDocument && depth % 3 === 1 && "border border-foreground/60 bg-transparent",
+              isDocument && depth % 3 === 2 && "rounded-xs",
+              ((node.segments.length === 0 && !hasChildren && node.todo === null) ||
+                (isDocument && node.todo !== null)) &&
                 "opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100",
             )}
           />
         </span>
       </span>
       {node.todo !== null ? (
-        <span className={cn("flex shrink-0 items-center", compact ? "h-5 pr-1" : "h-6 pr-1.5")}>
+        <span
+          className={cn(
+            "flex shrink-0 items-center",
+            rowHeight,
+            compact ? "pr-1" : isDocument ? "pr-2" : "pr-1.5",
+          )}
+        >
           <input
             type="checkbox"
             tabIndex={-1}
             aria-label={node.todo === "done" ? gt("Mark as not done") : gt("Mark as done")}
             checked={node.todo === "done"}
-            className={cn("cursor-pointer accent-primary", compact ? "size-3" : "size-3.5")}
+            className={cn(
+              "cursor-pointer accent-primary",
+              compact ? "size-3" : isDocument ? "size-4" : "size-3.5",
+            )}
             onChange={() =>
               editDay(date, (tree) =>
                 updateNode(tree, node.id, (current) => ({
